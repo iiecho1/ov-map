@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网页版奥维地图</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%232c3e50'/><circle cx='32' cy='32' r='20' fill='%233498db'/><polygon points='32,8 36,28 32,24 28,28' fill='%23e74c3c'/><polygon points='32,56 28,36 32,40 36,36' fill='%23fff'/><line x1='12' y1='32' x2='52' y2='32' stroke='%23fff' stroke-width='2'/><line x1='32' y1='12' x2='32' y2='52' stroke='%23fff' stroke-width='2'/></svg>">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h3>网页版奥维地图</h3>
+        </div>
+        <div class="search-box">
+            <div class="search-mode-toggle">
+                <button class="search-mode-btn active" data-mode="place" onclick="App.setSearchMode('place')">地点</button>
+                <button class="search-mode-btn" data-mode="layer" onclick="App.setSearchMode('layer')">图层</button>
+                <button class="search-mode-btn" data-mode="coord" onclick="App.setSearchMode('coord')">坐标</button>
+            </div>
+            <div class="search-input-wrap">
+                <input type="text" id="searchInput" placeholder="搜索地点..." autocomplete="off">
+                <button id="searchBtn" class="search-btn" onclick="App.doSearch()">&#128269;</button>
+            </div>
+            <div id="searchResults" class="search-results"></div>
+        </div>
+        <div class="sidebar-content">
+            <div class="layer-section">
+                <h4>底图切换</h4>
+                <div class="layer-list" id="baseLayers">
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="osm" checked> OpenStreetMap
+                    </label>
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="satellite"> 卫星地图(Esri)
+                    </label>
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="terrain"> 地形图
+                    </label>
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="gaode"> 高德地图
+                    </label>
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="gaodeSatellite"> 高德卫星
+                    </label>
+                    <label class="layer-item">
+                        <input type="radio" name="baseLayer" value="bingSatellite"> Bing卫星
+                    </label>
+                </div>
+            </div>
+            <div class="layer-section">
+                <h4>导入图层</h4>
+                <div class="import-buttons">
+                    <button id="importKml" class="btn btn-primary">导入 KML</button>
+                    <button id="importGeoJson" class="btn btn-primary">导入 GeoJSON</button>
+                    <button id="importGpx" class="btn btn-primary">导入 GPX</button>
+                </div>
+                <input type="file" id="fileInput" accept=".kml,.geojson,.json,.gpx" style="display:none">
+            </div>
+            <div class="layer-section">
+                <h4>已导入图层</h4>
+                <div id="importedLayers" class="layer-list">
+                    <p class="empty-hint">暂无导入图层</p>
+                </div>
+            </div>
+            <div class="layer-section">
+                <h4>测量结果</h4>
+                <div id="measureResults">
+                    <p class="empty-hint">使用绘图工具进行测量</p>
+                </div>
+                <button class="btn btn-warn" onclick="App.clearMeasurements()" style="margin-top:8px;width:100%">清除测量</button>
+            </div>
+            <div class="layer-section">
+                <h4>数据管理</h4>
+                <button class="btn btn-danger" onclick="App.clearAllData()" style="width:100%">清除所有存储数据</button>
+                <p class="empty-hint" style="margin-top:6px">清除后刷新页面生效</p>
+            </div>
+        </div>
+    </div>
+    <div id="map"></div>
+    <div id="coordinates">
+        <span id="cursorPos">经度: 0.000000, 纬度: 0.000000</span>
+        <span id="zoomLevel">缩放级别: 5</span>
+    </div>
+    <div id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">加载中...</div>
+    </div>
+    <div id="contextMenu" class="context-menu">
+        <div class="context-title">获取坐标</div>
+        <div class="context-coord" id="ctxCoord"></div>
+        <div class="context-actions">
+            <button onclick="App.copyCoord()">复制坐标</button>
+            <button onclick="App.searchFromCtx()">搜索附近</button>
+            <button onclick="App.addMarkerFromCtx()">添加标记</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/@tmcw/togeojson@4.5.0/dist/togeojson.umd.js"></script>
+    <script src="https://unpkg.com/togpx@0.5.4/togpx.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
