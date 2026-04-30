@@ -904,7 +904,7 @@ const App = {
             const d = this.importedLayers[id];
             if (!d) return '';
             return `<div class="layer-item" draggable="true" data-id="${id}">
-                <input type="checkbox" checked onchange="App.toggleLayer('${id}',this.checked)">
+                <input type="checkbox" ${d.visible !== false ? 'checked' : ''} onchange="App.toggleLayer('${id}',this.checked)">
                 <span class="layer-color-indicator" style="background:${d.color}"></span>
                 <div class="layer-item-info">
                     <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${this.escH(d.name)}</span>
@@ -990,7 +990,7 @@ const App = {
             el.textContent = newName;
             const all = await Storage.getAllLayers();
             const saved = all.find(l => String(l.id) === String(id));
-            Storage.saveLayer(id, { name: d.name, ext: d.ext, text: saved?.text || '', colorIndex: d.colorIndex });
+            Storage.saveLayer(Number(id), { name: d.name, ext: d.ext, text: saved?.text || '', colorIndex: d.colorIndex });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -998,7 +998,16 @@ const App = {
 
     toggleLayer(id, vis) {
         const d = this.importedLayers[id];
-        if (d) { if (vis) this.map.addLayer(d.layer); else this.map.removeLayer(d.layer); this.updateLabelOverlay(); }
+        if (d) {
+            d.visible = vis;
+            if (vis) this.map.addLayer(d.layer);
+            else this.map.removeLayer(d.layer);
+            this.updateLabelOverlay();
+            if (this.canvasRenderer) {
+                this.canvasRenderer._redrawBounds = null;
+                this.canvasRenderer._redraw();
+            }
+        }
     },
 
     async removeLayer(id) {
@@ -1007,7 +1016,7 @@ const App = {
             this.map.removeLayer(d.layer);
             delete this.importedLayers[id];
             this._layerOrder = (this._layerOrder || []).filter(x => x !== id);
-            await Storage.removeLayer(id);
+            await Storage.removeLayer(Number(id));
             this.updateImportedLayersList();
             this.updateLabelOverlay();
         }
