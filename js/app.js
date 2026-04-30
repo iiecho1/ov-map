@@ -86,37 +86,18 @@ L.GCJ02 = {
 };
 
 L.GCJ02TileLayer = L.TileLayer.extend({
-    _offset: null,
-    onAdd(map) {
-        L.TileLayer.prototype.onAdd.call(this, map);
-        this._updateOffset();
-        map.on('moveend zoomend', this._updateOffset, this);
-    },
-    onRemove(map) {
-        map.off('moveend zoomend', this._updateOffset, this);
-        this._resetOffset();
-        L.TileLayer.prototype.onRemove.call(this, map);
-    },
-    _updateOffset() {
-        if (!this._map) return;
-        const c = this._map.getCenter();
-        const z = this._map.getZoom();
+    _getTilePos(coords) {
+        const pos = L.TileLayer.prototype._getTilePos.call(this, coords);
+        const z = coords.z;
         const n = Math.pow(2, z);
-        const gcj = L.GCJ02.wgs84ToGcj02(c.lat, c.lng);
-        const wgsX = (c.lng + 180) / 360 * n * 256;
-        const wgsY = (1 - Math.log(Math.tan(c.lat * Math.PI / 180) + 1 / Math.cos(c.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
+        const lng = coords.x / n * 360 - 180;
+        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * coords.y / n))) * 180 / Math.PI;
+        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
         const gcjX = (gcj.lng + 180) / 360 * n * 256;
         const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
-        const dx = Math.round(gcjX - wgsX);
-        const dy = Math.round(gcjY - wgsY);
-        const container = this.getContainer();
-        if (container) {
-            container.style.transform = `translate(${-dx}px,${-dy}px)`;
-        }
-    },
-    _resetOffset() {
-        const container = this.getContainer();
-        if (container) container.style.transform = '';
+        const wgsX = coords.x * 256;
+        const wgsY = coords.y * 256;
+        return pos.subtract(L.point(gcjX - wgsX, gcjY - wgsY));
     }
 });
 
@@ -246,14 +227,14 @@ const App = {
     },
 
     initBaseLayers() {
-        this.baseLayers.osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 });
         this.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 });
-        this.baseLayers.terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap', maxZoom: 17 });
         this.baseLayers.gaode = new L.GCJ02TileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德', maxZoom: 18 });
         this.baseLayers.gaodeSatellite = new L.GCJ02TileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德卫星', maxZoom: 18 });
         this.baseLayers.bingSatellite = new L.BingSatelliteLayer();
-        this.baseLayers.osm.addTo(this.map);
-        this.currentBaseLayer = 'osm';
+        this.baseLayers.osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 });
+        this.baseLayers.terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap', maxZoom: 17 });
+        this.baseLayers.satellite.addTo(this.map);
+        this.currentBaseLayer = 'satellite';
     },
 
     initDrawControl() {
