@@ -81,10 +81,11 @@ const App = {
     baseLayers: {}, currentBaseLayer: null,
     importedLayers: {}, drawnItems: null, drawControl: null,
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
-    colorIndex: 0, _saveTimer: null, _labelTimer: null, _importing: false,
+    colorIndex: 0, _saveTimer: null, _labelTimer: null, _importing: false, _layerOrder: [],
 
     async init() {
         await Storage.init();
+        this.loadApiKey();
         this.initMap();
         this.initBaseLayers();
         this.initDrawControl();
@@ -338,23 +339,63 @@ const App = {
         container.classList.add('has-items');
     },
 
+    _gaodeKey: '',
+
+    toggleApiKeyBox() {
+        const box = document.getElementById('apiKeyBox');
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        if (box.style.display === 'block') {
+            document.getElementById('apiKeyInput').value = this._gaodeKey || '';
+        }
+    },
+
+    saveApiKey() {
+        this._gaodeKey = document.getElementById('apiKeyInput').value.trim();
+        localStorage.setItem('gaode_key', this._gaodeKey);
+        document.getElementById('apiKeyBox').style.display = 'none';
+        alert(this._gaodeKey ? 'API Key 已保存' : 'API Key 已清除');
+    },
+
+    loadApiKey() {
+        this._gaodeKey = localStorage.getItem('gaode_key') || '';
+    },
+
     async searchPlace(query) {
         const container = document.getElementById('searchResults');
+        if (!this._gaodeKey) {
+            container.innerHTML = '<div class="search-hint">请先配置高德 API Key<br><br>免费申请地址:<br>console.amap.com/dev/key/app<br><br>创建应用 → 添加Key → 选"Web服务"<br><br>点击搜索框右侧 ⚙ 配置</div>';
+            container.classList.add('has-items');
+            return;
+        }
         container.innerHTML = '<div class="search-hint">搜索中...</div>';
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const [revResp, searchResp] = await Promise.all([
-                fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${c.lat}&lon=${c.lng}&zoom=10&accept-language=zh-CN`, { headers: { 'User-Agent': 'ov-map/1.0' } }).catch(() => null),
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10&accept-language=zh-CN`, { headers: { 'User-Agent': 'ov-map/1.0' } })
+            const cityUrl = `https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`;
+            const searchUrl = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
+            const [cityResp, searchResp] = await Promise.all([
+                fetch(cityUrl).then(r => r.json()).catch(() => null),
+                fetch(searchUrl).then(r => r.json())
             ]);
-            let city = '';
-            if (revResp?.ok) { const d = await revResp.json(); const a = d.address || {}; city = a.city || a.town || a.county || a.state || ''; }
-            let results = await searchResp.json();
-            if (city && results.length > 0) { const lc = city.toLowerCase(); const local = results.filter(r => r.display_name.toLowerCase().includes(lc)); if (local.length) results = local; }
-            if (!results.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
-            container.innerHTML = results.slice(0, 8).map(r => `<div class="search-result-item" onclick="App.goToPlace(${r.lat},${r.lon},\`${this.escA(r.display_name)}\`)"><div class="result-name">${this.escH(r.display_name.split(',')[0])}</div><div class="result-sub">${this.escH(r.display_name)}</div></div>`).join('');
-        } catch { container.innerHTML = '<div class="search-hint">搜索失败</div>'; }
+            let cityCode = '';
+            if (cityResp?.regeocode?.addressComponent?.citycode) {
+                cityCode = cityResp.regeocode.addressComponent.citycode;
+            }
+            let searchUrl2 = searchUrl;
+            if (cityCode) searchUrl2 += `&city=${cityCode}`;
+            let results = searchResp;
+            if (cityCode && searchResp.pois) {
+                const local = searchResp.pois.filter(p => p.citycode === cityCode);
+                if (local.length > 0) results.pois = local;
+            }
+            if (!results.pois || !results.pois.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
+            container.innerHTML = results.pois.slice(0, 8).map(p => {
+                const loc = p.location.split(',');
+                const lng = parseFloat(loc[0]), lat = parseFloat(loc[1]);
+                const addr = p.address ? (Array.isArray(p.address) ? p.address.join(' ') : p.address) : '';
+                return `<div class="search-result-item" onclick="App.goToPlace(${lat},${lng},\`${this.escA(p.name)}\`)"><div class="result-name">${this.escH(p.name)}</div><div class="result-sub">${this.escH(addr || p.cityname || '')}</div></div>`;
+            }).join('');
+        } catch { container.innerHTML = '<div class="search-hint">搜索失败，请检查 API Key</div>'; }
     },
 
     goToPlace(lat, lon, name) {
@@ -487,13 +528,14 @@ const App = {
         this.map.on(L.Draw.Event.EDITED, e => { e.layers.eachLayer(l => this.showMeasure(l.feature?.geometry?.type || 'polygon', l)); });
     },
 
-    debouncedSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => { const c = this.map.getCenter(); Storage.saveState({ center: [c.lat, c.lng], zoom: this.map.getZoom(), baseLayer: this.currentBaseLayer }); }, 300); },
+    debouncedSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => { const c = this.map.getCenter(); Storage.saveState({ center: [c.lat, c.lng], zoom: this.map.getZoom(), baseLayer: this.currentBaseLayer, layerOrder: this._layerOrder || [] }); }, 300); },
 
     async restoreState() {
         const s = await Storage.getState();
         if (!s) return;
         if (s.baseLayer && this.baseLayers[s.baseLayer]) { this.switchBaseLayer(s.baseLayer); const r = document.querySelector(`input[name="baseLayer"][value="${s.baseLayer}"]`); if (r) r.checked = true; }
         if (s.center && s.zoom) this.map.setView(s.center, s.zoom);
+        if (s.layerOrder) this._layerOrder = s.layerOrder;
     },
 
     async restoreLayers() {
@@ -671,7 +713,7 @@ const App = {
         });
 
         group.addTo(this.map);
-        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache };
+        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, text, colorIndex: ci };
         return group;
     },
 
@@ -709,7 +751,7 @@ const App = {
             }
         });
         layer.addTo(this.map);
-        this.importedLayers[layerId] = { layer, name: fileName, color: fallback, _labelCache: labelCache };
+        this.importedLayers[layerId] = { layer, name: fileName, color: fallback, _labelCache: labelCache, ext, text, colorIndex: ci };
         return layer;
     },
 
@@ -754,9 +796,89 @@ const App = {
 
     updateImportedLayersList() {
         const c = document.getElementById('importedLayers');
-        const layers = Object.entries(this.importedLayers);
-        if (!layers.length) { c.innerHTML = '<p class="empty-hint">暂无导入图层</p>'; return; }
-        c.innerHTML = layers.map(([id, { name, color }]) => `<div class="layer-item"><input type="checkbox" checked onchange="App.toggleLayer(${id},this.checked)"><span class="layer-color-indicator" style="background:${color}"></span><div class="layer-item-info"><span class="layer-item-name">${name}</span><button class="btn btn-danger" onclick="App.removeLayer(${id})">删除</button></div></div>`).join('');
+        const ids = Object.keys(this.importedLayers);
+        if (!ids.length) { c.innerHTML = '<p class="empty-hint">暂无导入图层</p>'; return; }
+        if (!this._layerOrder || !this._layerOrder.length) this._layerOrder = ids;
+        this._layerOrder = this._layerOrder.filter(id => this.importedLayers[id]);
+        for (const id of ids) { if (!this._layerOrder.includes(id)) this._layerOrder.push(id); }
+
+        c.innerHTML = this._layerOrder.map((id, i) => {
+            const d = this.importedLayers[id];
+            if (!d) return '';
+            return `<div class="layer-item" draggable="true" data-id="${id}">
+                <input type="checkbox" checked onchange="App.toggleLayer('${id}',this.checked)">
+                <span class="layer-color-indicator" style="background:${d.color}"></span>
+                <div class="layer-item-info">
+                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${this.escH(d.name)}</span>
+                    <div class="layer-actions">
+                        <button title="上移" onclick="App.moveLayer('${id}',-1)" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
+                        <button title="下移" onclick="App.moveLayer('${id}',1)" ${i === this._layerOrder.length - 1 ? 'disabled' : ''}>&#9660;</button>
+                        <button title="删除" onclick="App.removeLayer('${id}')" style="color:#e74c3c">&#10005;</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+        this._bindLayerDrag();
+    },
+
+    _bindLayerDrag() {
+        const container = document.getElementById('importedLayers');
+        let dragId = null;
+        container.querySelectorAll('.layer-item[draggable]').forEach(el => {
+            el.addEventListener('dragstart', e => {
+                dragId = el.dataset.id;
+                el.style.opacity = '0.4';
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            el.addEventListener('dragend', () => { el.style.opacity = '1'; dragId = null; });
+            el.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; el.style.borderTop = '2px solid #3498db'; });
+            el.addEventListener('dragleave', () => { el.style.borderTop = ''; });
+            el.addEventListener('drop', e => {
+                e.preventDefault();
+                el.style.borderTop = '';
+                if (!dragId || dragId === el.dataset.id) return;
+                const fromId = dragId;
+                const toId = el.dataset.id;
+                const order = this._layerOrder;
+                const fromIdx = order.indexOf(fromId);
+                const toIdx = order.indexOf(toId);
+                if (fromIdx < 0 || toIdx < 0) return;
+                order.splice(fromIdx, 1);
+                order.splice(toIdx, 0, fromId);
+                this.updateImportedLayersList();
+                this.debouncedSave();
+            });
+        });
+    },
+
+    moveLayer(id, dir) {
+        const order = this._layerOrder;
+        const idx = order.indexOf(String(id));
+        if (idx < 0) return;
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= order.length) return;
+        [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+        this.updateImportedLayersList();
+        this.debouncedSave();
+    },
+
+    startRename(id, el) {
+        const d = this.importedLayers[id];
+        if (!d) return;
+        const input = document.createElement('input');
+        input.value = d.name;
+        el.textContent = '';
+        el.appendChild(input);
+        input.focus();
+        input.select();
+        const finish = () => {
+            const newName = input.value.trim() || d.name;
+            d.name = newName;
+            el.textContent = newName;
+            Storage.saveLayer(id, { name: d.name, ext: d.ext, text: d.text, colorIndex: d.colorIndex });
+        };
+        input.addEventListener('blur', finish);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
     },
 
     toggleLayer(id, vis) {
@@ -766,7 +888,14 @@ const App = {
 
     async removeLayer(id) {
         const d = this.importedLayers[id];
-        if (d) { this.map.removeLayer(d.layer); delete this.importedLayers[id]; await Storage.removeLayer(id); this.updateImportedLayersList(); this.updateLabelOverlay(); }
+        if (d) {
+            this.map.removeLayer(d.layer);
+            delete this.importedLayers[id];
+            this._layerOrder = (this._layerOrder || []).filter(x => x !== id);
+            await Storage.removeLayer(id);
+            this.updateImportedLayersList();
+            this.updateLabelOverlay();
+        }
     },
 
     showMeasure(type, layer) {

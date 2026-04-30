@@ -70,10 +70,12 @@ body {
 .search-input-wrap {
     display: flex;
     gap: 4px;
+    overflow: hidden;
 }
 
 .search-input-wrap input {
     flex: 1;
+    min-width: 0;
     padding: 7px 10px;
     border: 1px solid #4a6278;
     border-radius: 4px;
@@ -104,6 +106,45 @@ body {
 
 .search-btn:hover {
     background: #2980b9;
+}
+
+.api-key-box {
+    margin-top: 8px;
+    padding: 8px;
+    background: #2c3e50;
+    border-radius: 4px;
+}
+
+.api-key-label {
+    font-size: 11px;
+    color: #3498db;
+    margin-bottom: 6px;
+}
+
+.api-key-row {
+    display: flex;
+    gap: 4px;
+}
+
+.api-key-row input {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid #4a6278;
+    border-radius: 3px;
+    background: #34495e;
+    color: #ecf0f1;
+    font-size: 12px;
+    outline: none;
+}
+
+.api-key-row input:focus {
+    border-color: #3498db;
+}
+
+.api-key-hint {
+    font-size: 10px;
+    color: #7f8c8d;
+    margin-top: 4px;
 }
 
 .search-results {
@@ -321,6 +362,47 @@ body {
 .layer-item-name {
     font-size: 12px;
     word-break: break-all;
+    flex: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.layer-item-name:hover {
+    background: rgba(52, 152, 219, 0.2);
+}
+
+.layer-item-name input {
+    background: #34495e;
+    border: 1px solid #3498db;
+    color: #ecf0f1;
+    font-size: 12px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    outline: none;
+    width: 100%;
+}
+
+.layer-actions {
+    display: flex;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.layer-actions button {
+    background: none;
+    border: none;
+    color: #95a5a6;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.layer-actions button:hover {
+    background: rgba(255,255,255,0.1);
+    color: #ecf0f1;
 }
 
 .measure-result {

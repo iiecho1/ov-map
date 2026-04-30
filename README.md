@@ -5,7 +5,7 @@
 ## 功能特性
 
 ### 底图切换
-- OpenStreetMap 矢量地图
+- OpenStreetMap 矢量地图  （国外源）
 - Esri 卫星影像
 - OpenTopoMap 地形图
 - 高德地图 / 高德卫星
@@ -18,12 +18,18 @@
 - 纯标签点（如基站名称）只显示文字，不显示圆点
 - 图层数据持久化存储（IndexedDB），刷新页面自动恢复
 
+### 图层管理
+- 图层显示/隐藏开关
+- 图层排序（上移/下移按钮 + 拖拽排序）
+- 图层重命名（双击名称编辑）
+- 图层删除
+
 ### 搜索功能
-- **地点搜索**：基于 Nominatim，自动限定当前城市范围
+- **地点搜索**：基于高德地图 POI 搜索 API（需配置免费 API Key）
 - **图层搜索**：搜索已导入图层的要素名称和属性
 - **坐标搜索**：输入经纬度跳转，支持多种格式
   - `116.6377, 36.4237`
-  - `东经118°38′ 北纬37°25′`
+  - `东经116°38′ 北纬36°25′`
   - 自动剔除汉字等无关字符
 
 ### 坐标工具
@@ -50,13 +56,35 @@
 ```bash
 cd ov-map
 
-# 方式一：Python
-python3 -m http.server 8080 --bind 0.0.0.0
-# 浏览器访问 http://localhost:8080
+# 方式一：Python 启动脚本（自动打开浏览器）
+python3 start.py
 
-# 方式二：直接打开
+# 方式二：Python 原生命令
+python3 -m http.server 8080 --bind 0.0.0.0
+
+# 方式三：直接打开
 # 浏览器打开 index.html（IP定位等部分功能受限）
 ```
+
+### 部署到 Vercel
+
+项目为纯静态站点，可直接部署：
+
+1. 推送到 GitHub 仓库
+2. 在 [vercel.com](https://vercel.com) 导入仓库
+3. Framework Preset 选 **Other**，Build Command 和 Output Directory 留空
+4. 点击 Deploy
+
+`vercel.json` 和 `.gitignore` 已包含在项目中。
+
+## 高德搜索 API 配置
+
+地点搜索使用高德地图 Web 服务 API，需要免费 API Key：
+
+1. 访问 [console.amap.com/dev/key/app](https://console.amap.com/dev/key/app)
+2. 注册/登录后创建应用
+3. 添加 Key，服务平台选 **Web 服务**
+4. 在网页中点击搜索框右侧 ⚙ 图标，输入 Key 并保存
 
 ## 技术栈
 
@@ -66,7 +94,7 @@ python3 -m http.server 8080 --bind 0.0.0.0
 | Leaflet.draw | 绘图工具 |
 | toGeoJSON | KML/GPX 转 GeoJSON |
 | IndexedDB | 图层和状态持久化存储 |
-| Nominatim | 地点搜索 API |
+| 高德 Web API | 地点搜索 |
 | ip-api.com | IP 定位降级 |
 | Canvas overlay | 标签文字渲染 |
 
@@ -79,7 +107,9 @@ ov-map/
 │   └── style.css     # 样式（侧边栏、搜索、弹窗、加载动画等）
 ├── js/
 │   └── app.js        # 主程序（底图、图层、搜索、定位、标签、持久化）
-├── start.py          # Python 启动脚本
+├── start.py          # Python 启动脚本（自动打开浏览器）
+├── vercel.json       # Vercel 部署配置
+├── .gitignore        # Git 忽略规则
 └── README.md
 ```
 
