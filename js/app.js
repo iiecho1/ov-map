@@ -53,6 +53,59 @@ const Storage = {
     }
 };
 
+L.GCJ02 = {
+    _PI: Math.PI,
+    _a: 6378245.0,
+    _ee: 0.00669342162296594323,
+    _transform(lat, lng) {
+        let dLat = this._transformLat(lng - 105.0, lat - 35.0);
+        let dLng = this._transformLng(lng - 105.0, lat - 35.0);
+        const radLat = lat / 180.0 * this._PI;
+        let magic = Math.sin(radLat);
+        magic = 1 - this._ee * magic * magic;
+        const sqrtMagic = Math.sqrt(magic);
+        dLat = (dLat * 180.0) / ((this._a * (1 - this._ee)) / (magic * sqrtMagic) * this._PI);
+        dLng = (dLng * 180.0) / (this._a / sqrtMagic * Math.cos(radLat) * this._PI);
+        return { lat: lat + dLat, lng: lng + dLng };
+    },
+    _transformLat(x, y) {
+        let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(y * this._PI) + 40.0 * Math.sin(y / 3.0 * this._PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(y / 12.0 * this._PI) + 320 * Math.sin(y * this._PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    },
+    _transformLng(x, y) {
+        let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(x * this._PI) + 40.0 * Math.sin(x / 3.0 * this._PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(x / 12.0 * this._PI) + 300.0 * Math.sin(x / 30.0 * this._PI)) * 2.0 / 3.0;
+        return ret;
+    },
+    wgs84ToGcj02(lat, lng) { return this._transform(lat, lng); }
+};
+
+L.GCJ02TileLayer = L.TileLayer.extend({
+    initialize(url, opts) {
+        L.TileLayer.prototype.initialize.call(this, url, opts);
+    },
+    getTileUrl(coords) {
+        const tileSize = 256;
+        const z = coords.z;
+        const x = coords.x;
+        const y = coords.y;
+        const n = Math.pow(2, z);
+        const lng = x / n * 360.0 - 180.0;
+        const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+        const lat = latRad * 180.0 / Math.PI;
+        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
+        const gcjX = (gcj.lng + 180.0) / 360.0 * n;
+        const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n;
+        const s = this._getSubdomain({ x: Math.floor(gcjX), y: Math.floor(gcjY), z });
+        return L.Util.template(this._url, { s, x: Math.floor(gcjX), y: Math.floor(gcjY), z });
+    }
+});
+
 L.BingSatelliteLayer = L.TileLayer.extend({
     options: { attribution: '&copy; Bing', maxZoom: 19 },
     initialize() {
@@ -182,8 +235,8 @@ const App = {
         this.baseLayers.osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 });
         this.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 });
         this.baseLayers.terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap', maxZoom: 17 });
-        this.baseLayers.gaode = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德', maxZoom: 18 });
-        this.baseLayers.gaodeSatellite = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德卫星', maxZoom: 18 });
+        this.baseLayers.gaode = new L.GCJ02TileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德', maxZoom: 18 });
+        this.baseLayers.gaodeSatellite = new L.GCJ02TileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德卫星', maxZoom: 18 });
         this.baseLayers.bingSatellite = new L.BingSatelliteLayer();
         this.baseLayers.osm.addTo(this.map);
         this.currentBaseLayer = 'osm';
