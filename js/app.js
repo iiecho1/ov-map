@@ -82,7 +82,11 @@ L.GCJ02 = {
         ret += (150.0 * Math.sin(x / 12.0 * this._PI) + 300.0 * Math.sin(x / 30.0 * this._PI)) * 2.0 / 3.0;
         return ret;
     },
-    wgs84ToGcj02(lat, lng) { return this._transform(lat, lng); }
+    wgs84ToGcj02(lat, lng) { return this._transform(lat, lng); },
+    gcj02ToWgs84(lat, lng) {
+        const t = this._transform(lat, lng);
+        return { lat: lat * 2 - t.lat, lng: lng * 2 - t.lng };
+    }
 };
 
 L.GCJ02TileLayer = L.TileLayer.extend({
@@ -445,21 +449,20 @@ const App = {
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const baseUrl = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
-            const [cityResp, results] = await Promise.all([
-                fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null),
-                fetch(baseUrl).then(r => r.json())
-            ]);
+            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null);
             const cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
             const cityName = cityResp?.regeocode?.addressComponent?.city || '';
-            if (cityCode && results.pois) results.pois.sort((a, b) => (a.citycode === cityCode ? 0 : 1) - (b.citycode === cityCode ? 0 : 1));
+            let url = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
+            if (cityCode) url += `&city=${cityCode}&citylimit=true`;
+            const results = await fetch(url).then(r => r.json());
             if (!results.pois || !results.pois.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
             container.innerHTML = (cityName ? `<div class="search-hint">搜索范围: ${cityName}</div>` : '') +
                 results.pois.slice(0, 8).map(p => {
                 const loc = p.location.split(',');
-                const lng = parseFloat(loc[0]), lat = parseFloat(loc[1]);
+                const gcjLng = parseFloat(loc[0]), gcjLat = parseFloat(loc[1]);
+                const wgs = L.GCJ02.gcj02ToWgs84(gcjLat, gcjLng);
                 const addr = p.address ? (Array.isArray(p.address) ? p.address.join(' ') : p.address) : '';
-                return `<div class="search-result-item" onclick="App.goToPlace(${lat},${lng},\`${this.escA(p.name)}\`)"><div class="result-name">${this.escH(p.name)}</div><div class="result-sub">${this.escH(addr || p.cityname || '')}</div></div>`;
+                return `<div class="search-result-item" onclick="App.goToPlace(${wgs.lat},${wgs.lng},\`${this.escA(p.name)}\`)"><div class="result-name">${this.escH(p.name)}</div><div class="result-sub">${this.escH(addr || p.cityname || '')}</div></div>`;
             }).join('');
         } catch { container.innerHTML = '<div class="search-hint">搜索失败，请检查 API Key</div>'; }
     },
