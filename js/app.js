@@ -86,23 +86,37 @@ L.GCJ02 = {
 };
 
 L.GCJ02TileLayer = L.TileLayer.extend({
-    initialize(url, opts) {
-        L.TileLayer.prototype.initialize.call(this, url, opts);
+    _offset: null,
+    onAdd(map) {
+        L.TileLayer.prototype.onAdd.call(this, map);
+        this._updateOffset();
+        map.on('moveend zoomend', this._updateOffset, this);
     },
-    getTileUrl(coords) {
-        const tileSize = 256;
-        const z = coords.z;
-        const x = coords.x;
-        const y = coords.y;
+    onRemove(map) {
+        map.off('moveend zoomend', this._updateOffset, this);
+        this._resetOffset();
+        L.TileLayer.prototype.onRemove.call(this, map);
+    },
+    _updateOffset() {
+        if (!this._map) return;
+        const c = this._map.getCenter();
+        const z = this._map.getZoom();
         const n = Math.pow(2, z);
-        const lng = x / n * 360.0 - 180.0;
-        const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
-        const lat = latRad * 180.0 / Math.PI;
-        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
-        const gcjX = (gcj.lng + 180.0) / 360.0 * n;
-        const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n;
-        const s = this._getSubdomain({ x: Math.floor(gcjX), y: Math.floor(gcjY), z });
-        return L.Util.template(this._url, { s, x: Math.floor(gcjX), y: Math.floor(gcjY), z });
+        const gcj = L.GCJ02.wgs84ToGcj02(c.lat, c.lng);
+        const wgsX = (c.lng + 180) / 360 * n * 256;
+        const wgsY = (1 - Math.log(Math.tan(c.lat * Math.PI / 180) + 1 / Math.cos(c.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
+        const gcjX = (gcj.lng + 180) / 360 * n * 256;
+        const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
+        const dx = Math.round(gcjX - wgsX);
+        const dy = Math.round(gcjY - wgsY);
+        const container = this.getContainer();
+        if (container) {
+            container.style.transform = `translate(${-dx}px,${-dy}px)`;
+        }
+    },
+    _resetOffset() {
+        const container = this.getContainer();
+        if (container) container.style.transform = '';
     }
 });
 
