@@ -371,25 +371,15 @@ const App = {
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const cityUrl = `https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`;
-            const searchUrl = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
-            const [cityResp, searchResp] = await Promise.all([
-                fetch(cityUrl).then(r => r.json()).catch(() => null),
-                fetch(searchUrl).then(r => r.json())
-            ]);
-            let cityCode = '';
-            if (cityResp?.regeocode?.addressComponent?.citycode) {
-                cityCode = cityResp.regeocode.addressComponent.citycode;
-            }
-            let searchUrl2 = searchUrl;
-            if (cityCode) searchUrl2 += `&city=${cityCode}`;
-            let results = searchResp;
-            if (cityCode && searchResp.pois) {
-                const local = searchResp.pois.filter(p => p.citycode === cityCode);
-                if (local.length > 0) results.pois = local;
-            }
+            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null);
+            const cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
+            const cityName = cityResp?.regeocode?.addressComponent?.city || '';
+            let url = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
+            if (cityCode) url += `&city=${cityCode}&citylimit=true`;
+            const results = await fetch(url).then(r => r.json());
             if (!results.pois || !results.pois.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
-            container.innerHTML = results.pois.slice(0, 8).map(p => {
+            container.innerHTML = (cityName ? `<div class="search-hint">搜索范围: ${cityName}</div>` : '') +
+                results.pois.slice(0, 8).map(p => {
                 const loc = p.location.split(',');
                 const lng = parseFloat(loc[0]), lat = parseFloat(loc[1]);
                 const addr = p.address ? (Array.isArray(p.address) ? p.address.join(' ') : p.address) : '';
