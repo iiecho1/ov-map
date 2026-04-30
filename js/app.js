@@ -86,18 +86,37 @@ L.GCJ02 = {
 };
 
 L.GCJ02TileLayer = L.TileLayer.extend({
-    _getTilePos(coords) {
-        const pos = L.TileLayer.prototype._getTilePos.call(this, coords);
-        const z = coords.z;
+    _offset: null,
+    onAdd(map) {
+        L.TileLayer.prototype.onAdd.call(this, map);
+        this._updateOffset();
+        map.on('moveend zoomend', this._updateOffset, this);
+    },
+    onRemove(map) {
+        map.off('moveend zoomend', this._updateOffset, this);
+        this._resetOffset();
+        L.TileLayer.prototype.onRemove.call(this, map);
+    },
+    _updateOffset() {
+        if (!this._map) return;
+        const c = this._map.getCenter();
+        const z = this._map.getZoom();
         const n = Math.pow(2, z);
-        const lng = coords.x / n * 360 - 180;
-        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * coords.y / n))) * 180 / Math.PI;
-        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
+        const gcj = L.GCJ02.wgs84ToGcj02(c.lat, c.lng);
+        const wgsX = (c.lng + 180) / 360 * n * 256;
+        const wgsY = (1 - Math.log(Math.tan(c.lat * Math.PI / 180) + 1 / Math.cos(c.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
         const gcjX = (gcj.lng + 180) / 360 * n * 256;
         const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
-        const wgsX = coords.x * 256;
-        const wgsY = coords.y * 256;
-        return pos.subtract(L.point(gcjX - wgsX, gcjY - wgsY));
+        const dx = Math.round(gcjX - wgsX);
+        const dy = Math.round(gcjY - wgsY);
+        const container = this.getContainer();
+        if (container) {
+            container.style.transform = `translate(${-dx}px,${-dy}px)`;
+        }
+    },
+    _resetOffset() {
+        const container = this.getContainer();
+        if (container) container.style.transform = '';
     }
 });
 
@@ -107,15 +126,15 @@ L.BingSatelliteLayer = L.TileLayer.extend({
         L.TileLayer.prototype.initialize.call(this, '', this.options);
     },
     _toQuadKey(x, y, z) {
-        let key = '';
-        for (let i = z; i > 0; i--) {
+        const arr = new Array(z);
+        for (let i = z - 1; i >= 0; i--) {
             let digit = 0;
-            const mask = 1 << (i - 1);
+            const mask = 1 << i;
             if (x & mask) digit += 1;
             if (y & mask) digit += 2;
-            key += digit;
+            arr[z - 1 - i] = digit;
         }
-        return key;
+        return arr.join('');
     },
     getTileUrl(coords) {
         const q = this._toQuadKey(coords.x, coords.y, coords.z);
@@ -129,7 +148,7 @@ const App = {
     baseLayers: {}, currentBaseLayer: null,
     importedLayers: {}, drawnItems: null, drawControl: null,
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
-    colorIndex: 0, _saveTimer: null, _labelTimer: null, _importing: false, _layerOrder: [],
+    colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [],
 
     async init() {
         await Storage.init();
@@ -171,43 +190,50 @@ const App = {
                 map.off('moveend zoomend resize', this._throttledUpdate, this);
             },
             _throttledUpdate() {
-                clearTimeout(self._labelTimer);
-                self._labelTimer = setTimeout(() => this._update(), 100);
+                if (this._rafPending) return;
+                this._rafPending = true;
+                requestAnimationFrame(() => { this._rafPending = false; this._update(); });
             },
             _update() {
                 const map = this._map;
                 if (!map) return;
                 const size = map.getSize();
                 const dpr = window.devicePixelRatio || 1;
-                this._canvas.width = size.x * dpr;
-                this._canvas.height = size.y * dpr;
-                this._canvas.style.width = size.x + 'px';
-                this._canvas.style.height = size.y + 'px';
+                const cw = size.x * dpr, ch = size.y * dpr;
+                if (this._canvas.width !== cw || this._canvas.height !== ch) {
+                    this._canvas.width = cw;
+                    this._canvas.height = ch;
+                    this._canvas.style.width = size.x + 'px';
+                    this._canvas.style.height = size.y + 'px';
+                }
                 const topLeft = map.containerPointToLayerPoint([0, 0]);
                 L.DomUtil.setPosition(this._canvas, topLeft);
                 const ctx = this._canvas.getContext('2d');
-                ctx.scale(dpr, dpr);
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.clearRect(0, 0, size.x, size.y);
 
                 if (map.getZoom() < 14) return;
+
+                const bounds = map.getBounds();
+                const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+                const latPad = (ne.lat - sw.lat) * 0.2, lngPad = (ne.lng - sw.lng) * 0.2;
+                const filterBounds = L.latLngBounds([sw.lat - latPad, sw.lng - lngPad], [ne.lat + latPad, ne.lng + lngPad]);
+                const pad = 100;
 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = '11px Microsoft YaHei,sans-serif';
 
-                const pad = 100;
                 for (const data of Object.values(App.importedLayers)) {
                     if (!data._labelCache || !map.hasLayer(data.layer)) continue;
                     for (const item of data._labelCache) {
-                        let pt;
-                        if (item.type === 'point') {
-                            pt = map.latLngToContainerPoint(item.latlng);
-                        } else if (item._c) {
-                            pt = map.latLngToContainerPoint(item._c);
-                        } else if (item.bounds) {
-                            item._c = item.bounds.getCenter();
-                            pt = map.latLngToContainerPoint(item._c);
-                        } else continue;
+                        if (!item._c) {
+                            if (item.type === 'point') item._c = item.latlng;
+                            else if (item.bounds) item._c = item.bounds.getCenter();
+                            else continue;
+                        }
+                        if (!filterBounds.contains(item._c)) continue;
+                        const pt = map.latLngToContainerPoint(item._c);
                         if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
                         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
                         ctx.lineWidth = 3;
@@ -419,12 +445,14 @@ const App = {
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null);
+            const baseUrl = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
+            const [cityResp, results] = await Promise.all([
+                fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null),
+                fetch(baseUrl).then(r => r.json())
+            ]);
             const cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
             const cityName = cityResp?.regeocode?.addressComponent?.city || '';
-            let url = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
-            if (cityCode) url += `&city=${cityCode}&citylimit=true`;
-            const results = await fetch(url).then(r => r.json());
+            if (cityCode && results.pois) results.pois.sort((a, b) => (a.citycode === cityCode ? 0 : 1) - (b.citycode === cityCode ? 0 : 1));
             if (!results.pois || !results.pois.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
             container.innerHTML = (cityName ? `<div class="search-hint">搜索范围: ${cityName}</div>` : '') +
                 results.pois.slice(0, 8).map(p => {
@@ -447,17 +475,14 @@ const App = {
         const container = document.getElementById('searchResults');
         const q = query.toLowerCase();
         const matches = [];
-        for (const [, { layer, name: ln }] of Object.entries(this.importedLayers)) {
-            layer.eachLayer(sub => {
-                const f = sub.feature;
-                if (!f?.properties) return;
-                const name = (f.properties.name || '').toLowerCase();
-                if (name.includes(q)) { matches.push({ display: f.properties.name || ln, sub: `来自: ${ln}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
-                for (const [k, v] of Object.entries(f.properties)) {
-                    if (k.startsWith('_') || k === 'styleUrl' || k === 'styleHash') continue;
-                    if (String(v).toLowerCase().includes(q)) { matches.push({ display: f.properties.name || ln, sub: `${k}: ${v}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
+        for (const [layerId, data] of Object.entries(this.importedLayers)) {
+            if (!data._searchIndex) this._buildSearchIndex(layerId);
+            const ln = data.name;
+            for (const item of data._searchIndex) {
+                for (const t of item.texts) {
+                    if (t.includes(q)) { matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng }); break; }
                 }
-            });
+            }
         }
         if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; container.classList.add('has-items'); return; }
         const limit = matches.slice(0, 20);
@@ -477,6 +502,26 @@ const App = {
     getCenter(sub, f) {
         if (f.geometry?.type === 'Point') { const c = f.geometry.coordinates; return [c[1], c[0]]; }
         return sub.getBounds?.().isValid?.() ? sub.getBounds().getCenter() : null;
+    },
+
+    _buildSearchIndex(layerId) {
+        const data = this.importedLayers[layerId];
+        if (!data) return;
+        const index = [];
+        const skip = new Set(['_kmlStyle', '_styleUrl', '_kmlDescription', 'styleUrl', 'styleHash']);
+        data.layer.eachLayer(sub => {
+            const f = sub.feature;
+            if (!f?.properties) return;
+            const texts = [];
+            const name = f.properties.name || '';
+            if (name) texts.push(name.toLowerCase());
+            for (const [k, v] of Object.entries(f.properties)) {
+                if (skip.has(k) || k.startsWith('_') || k === 'name') continue;
+                if (v) texts.push(String(v).toLowerCase());
+            }
+            index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), texts });
+        });
+        data._searchIndex = index;
     },
 
     escH(s) { return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') : ''; },
@@ -623,13 +668,23 @@ const App = {
 
     enrichKml(geoJson, kmlDoc) {
         const sm = {};
-        kmlDoc.querySelectorAll('Style').forEach(el => { const id = el.getAttribute('id'); if (id) sm['#' + id] = this.parseStyle(el); });
-        kmlDoc.querySelectorAll('StyleMap').forEach(el => {
-            const id = el.getAttribute('id'); if (!id) return;
-            const p = el.querySelector('Pair');
-            if (p) { const u = p.querySelector('styleUrl'); if (u) { const ref = u.textContent.trim(); if (sm[ref]) sm['#' + id] = sm[ref]; } }
-        });
-        const pms = kmlDoc.querySelectorAll('Placemark');
+        const pms = [];
+        const all = kmlDoc.getElementsByTagName('*');
+        for (let i = 0; i < all.length; i++) {
+            const el = all[i];
+            const tag = el.tagName;
+            if (tag === 'Style') {
+                const id = el.getAttribute('id');
+                if (id) sm['#' + id] = this.parseStyle(el);
+            } else if (tag === 'StyleMap') {
+                const id = el.getAttribute('id');
+                if (!id) continue;
+                const p = el.querySelector('Pair');
+                if (p) { const u = p.querySelector('styleUrl'); if (u) { const ref = u.textContent.trim(); if (sm[ref]) sm['#' + id] = sm[ref]; } }
+            } else if (tag === 'Placemark') {
+                pms.push(el);
+            }
+        }
         for (let i = 0; i < pms.length && i < geoJson.features.length; i++) {
             const pm = pms[i], f = geoJson.features[i];
             const ist = pm.querySelector('Style');
@@ -662,18 +717,21 @@ const App = {
         return { color: fallback, weight: 3 };
     },
 
+    _skipProps: new Set(['styleUrl', 'styleHash', '_kmlStyle', '_styleUrl', '_kmlDescription']),
+
     getPopup(f) {
+        if (f._popupHtml !== undefined) return f._popupHtml;
         const kd = f.properties?._kmlDescription;
-        if (kd) return kd;
-        if (!f.properties) return '';
-        const skip = new Set(['styleUrl', 'styleHash', '_kmlStyle', '_styleUrl', '_kmlDescription']);
-        const entries = Object.entries(f.properties).filter(([k, v]) => v && !skip.has(k));
-        if (!entries.length) return '';
+        if (kd) { f._popupHtml = kd; return kd; }
+        if (!f.properties) { f._popupHtml = ''; return ''; }
+        const entries = Object.entries(f.properties).filter(([k, v]) => v && !this._skipProps.has(k));
+        if (!entries.length) { f._popupHtml = ''; return ''; }
         let h = '';
-        if (f.properties.name) h += `<div class="popup-title">${f.properties.name}</div>`;
+        if (f.properties.name) h += `<div class="popup-title">${this.escH(f.properties.name)}</div>`;
         h += '<table class="popup-table">';
-        for (const [k, v] of entries) { if (k !== 'name') h += `<tr><td class="popup-key">${k}</td><td class="popup-val">${v}</td></tr>`; }
-        return h + '</table>';
+        for (const [k, v] of entries) { if (k !== 'name') h += `<tr><td class="popup-key">${this.escH(k)}</td><td class="popup-val">${this.escH(String(v))}</td></tr>`; }
+        f._popupHtml = h + '</table>';
+        return f._popupHtml;
     },
 
     async renderLayerAsync(text, ext, fileName, layerId, ci, onProgress) {
@@ -751,7 +809,7 @@ const App = {
         });
 
         group.addTo(this.map);
-        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, text, colorIndex: ci };
+        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
         return group;
     },
 
@@ -789,7 +847,7 @@ const App = {
             }
         });
         layer.addTo(this.map);
-        this.importedLayers[layerId] = { layer, name: fileName, color: fallback, _labelCache: labelCache, ext, text, colorIndex: ci };
+        this.importedLayers[layerId] = { layer, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
         return layer;
     },
 
@@ -811,7 +869,9 @@ const App = {
             const text = await file.text();
             const layerId = Date.now();
             let layer;
-            const total = (text.match(/<Placemark>/g) || []).length;
+            let total = 0;
+            const pmRe = /<Placemark>/g;
+            while (pmRe.exec(text)) total++;
             if (total > 500) {
                 layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
             } else {
@@ -860,32 +920,47 @@ const App = {
     },
 
     _bindLayerDrag() {
+        if (this._layerDragBound) return;
+        this._layerDragBound = true;
         const container = document.getElementById('importedLayers');
         let dragId = null;
-        container.querySelectorAll('.layer-item[draggable]').forEach(el => {
-            el.addEventListener('dragstart', e => {
-                dragId = el.dataset.id;
-                el.style.opacity = '0.4';
-                e.dataTransfer.effectAllowed = 'move';
-            });
-            el.addEventListener('dragend', () => { el.style.opacity = '1'; dragId = null; });
-            el.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; el.style.borderTop = '2px solid #3498db'; });
-            el.addEventListener('dragleave', () => { el.style.borderTop = ''; });
-            el.addEventListener('drop', e => {
-                e.preventDefault();
-                el.style.borderTop = '';
-                if (!dragId || dragId === el.dataset.id) return;
-                const fromId = dragId;
-                const toId = el.dataset.id;
-                const order = this._layerOrder;
-                const fromIdx = order.indexOf(fromId);
-                const toIdx = order.indexOf(toId);
-                if (fromIdx < 0 || toIdx < 0) return;
-                order.splice(fromIdx, 1);
-                order.splice(toIdx, 0, fromId);
-                this.updateImportedLayersList();
-                this.debouncedSave();
-            });
+        container.addEventListener('dragstart', e => {
+            const el = e.target.closest('.layer-item[draggable]');
+            if (!el) return;
+            dragId = el.dataset.id;
+            el.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        container.addEventListener('dragend', e => {
+            const el = e.target.closest('.layer-item[draggable]');
+            if (el) el.style.opacity = '1';
+            dragId = null;
+        });
+        container.addEventListener('dragover', e => {
+            const el = e.target.closest('.layer-item[draggable]');
+            if (!el) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            el.style.borderTop = '2px solid #3498db';
+        });
+        container.addEventListener('dragleave', e => {
+            const el = e.target.closest('.layer-item[draggable]');
+            if (el) el.style.borderTop = '';
+        });
+        container.addEventListener('drop', e => {
+            e.preventDefault();
+            const el = e.target.closest('.layer-item[draggable]');
+            if (!el) return;
+            el.style.borderTop = '';
+            if (!dragId || dragId === el.dataset.id) return;
+            const order = this._layerOrder;
+            const fromIdx = order.indexOf(dragId);
+            const toIdx = order.indexOf(el.dataset.id);
+            if (fromIdx < 0 || toIdx < 0) return;
+            order.splice(fromIdx, 1);
+            order.splice(toIdx, 0, dragId);
+            this.updateImportedLayersList();
+            this.debouncedSave();
         });
     },
 
@@ -909,11 +984,13 @@ const App = {
         el.appendChild(input);
         input.focus();
         input.select();
-        const finish = () => {
+        const finish = async () => {
             const newName = input.value.trim() || d.name;
             d.name = newName;
             el.textContent = newName;
-            Storage.saveLayer(id, { name: d.name, ext: d.ext, text: d.text, colorIndex: d.colorIndex });
+            const all = await Storage.getAllLayers();
+            const saved = all.find(l => String(l.id) === String(id));
+            Storage.saveLayer(id, { name: d.name, ext: d.ext, text: saved?.text || '', colorIndex: d.colorIndex });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
