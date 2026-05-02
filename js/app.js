@@ -164,7 +164,7 @@ const App = {
         this.initLabelOverlay();
         this.initEventListeners();
         await this.restoreState();
-        await this.restoreLayers();
+        this.restoreLayers();
     },
 
     initMap() {
@@ -626,7 +626,17 @@ const App = {
 
     async restoreLayers() {
         const saved = await Storage.getAllLayers();
-        for (const item of saved) { try { this.renderLayer(item.text, item.ext, item.name, item.id, item.colorIndex); } catch (e) { console.error('restore failed:', item.name, e); } }
+        if (!saved.length) return;
+        this.showLoading(`加载 ${saved.length} 个图层...`);
+        for (let i = 0; i < saved.length; i++) {
+            const item = saved[i];
+            this.showLoading(`加载 ${i + 1}/${saved.length}: ${item.name || ''}`);
+            try {
+                await this.renderLayerAsync(item.text, item.ext, item.name, item.id, item.colorIndex);
+            } catch (e) { console.error('restore failed:', item.name, e); }
+            if (i + 1 < saved.length) await new Promise(r => setTimeout(r, 0));
+        }
+        this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
     },
@@ -788,10 +798,10 @@ const App = {
                     layer = m;
                 } else {
                     layer = L.GeoJSON.geometryToLayer(f, {
-                        renderer: self.canvasRenderer,
-                        style: () => self.getStyle(f, fallback)
+                        renderer: self.canvasRenderer
                     });
                     layer.feature = f;
+                    if (layer.setStyle) layer.setStyle(self.getStyle(f, fallback));
                     if ((gt === 'Polygon' || gt === 'MultiPolygon') && f.properties?.name) {
                         labelCache.push({ text: f.properties.name, bounds: layer.getBounds(), type: 'polygon' });
                     }
@@ -871,17 +881,7 @@ const App = {
             this.showLoading('读取文件...');
             const text = await file.text();
             const layerId = Date.now();
-            let layer;
-            let total = 0;
-            const pmRe = /<Placemark>/g;
-            while (pmRe.exec(text)) total++;
-            if (total > 500) {
-                layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
-            } else {
-                this.showLoading('渲染中...');
-                await new Promise(r => setTimeout(r, 16));
-                layer = this.renderLayer(text, ext, fileName, layerId, ci);
-            }
+            const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
             if (!layer) { this.hideLoading(); this._importing = false; return; }
             if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
             this.showLoading('保存...');
