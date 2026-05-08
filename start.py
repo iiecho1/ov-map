@@ -11,6 +11,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
 
+    def do_GET(self):
+        if self.path == '/admin' or self.path == '/admin/':
+            self.path = '/admin.html'
+        return super().do_GET()
+
 if __name__ == "__main__":
     with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
         print(f"网页版奥维地图已启动")

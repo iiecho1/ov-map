@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - 网页版奥维地图</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%232c3e50'/><circle cx='32' cy='32' r='20' fill='%23e74c3c'/><text x='32' y='40' text-anchor='middle' fill='white' font-size='24' font-weight='bold'>A</text></svg>">
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <div id="loginPage" class="login-page">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon">&#9881;</div>
+                <h2>管理后台</h2>
+                <p>网页版奥维地图</p>
+            </div>
+            <form id="loginForm" onsubmit="return Admin.login(event)">
+                <div class="form-group">
+                    <label for="password">管理密码</label>
+                    <input type="password" id="password" placeholder="请输入管理密码" autocomplete="current-password" required>
+                </div>
+                <div id="loginError" class="login-error" style="display:none">密码错误</div>
+                <button type="submit" class="btn-login">登 录</button>
+            </form>
+            <div class="login-hint">
+                <a href="index.html">&larr; 返回地图</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="adminPage" class="admin-page" style="display:none">
+        <div class="admin-header">
+            <div class="admin-header-left">
+                <h1>&#9881; 管理后台</h1>
+                <span class="admin-subtitle">KML 图层管理</span>
+            </div>
+            <div class="admin-header-right">
+                <a href="index.html" class="btn-header">&larr; 返回地图</a>
+                <button class="btn-header btn-logout" onclick="Admin.logout()">退出登录</button>
+            </div>
+        </div>
+
+        <div class="admin-content">
+            <div class="admin-section">
+                <div class="section-header">
+                    <h3>上传 KML 文件</h3>
+                    <span class="section-desc">上传的 KML 文件将在主页面启动时自动加载为图层</span>
+                </div>
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">&#128228;</div>
+                    <p>拖拽 KML 文件到此处，或点击选择文件</p>
+                    <input type="file" id="kmlFileInput" accept=".kml" multiple style="display:none">
+                    <button class="btn btn-primary" onclick="document.getElementById('kmlFileInput').click()">选择 KML 文件</button>
+                </div>
+                <div id="uploadProgress" class="upload-progress" style="display:none">
+                    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                    <span id="progressText">上传中...</span>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <div class="section-header">
+                    <h3>云端 KML 文件列表</h3>
+                    <button class="btn btn-small btn-primary" onclick="Admin.refreshList()">刷新</button>
+                </div>
+                <div id="kmlFileList" class="file-list">
+                    <p class="empty-hint">暂无云端 KML 文件</p>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <div class="section-header">
+                    <h3>存储设置</h3>
+                </div>
+                <div class="settings-group">
+                    <div class="setting-item">
+                        <label>云端 API 地址（可选）</label>
+                        <div class="setting-row">
+                            <input type="text" id="cloudApiUrl" placeholder="留空使用本地 IndexedDB 存储，填入 API 地址使用云端存储">
+                            <button class="btn btn-small btn-primary" onclick="Admin.saveCloudApi()">保存</button>
+                        </div>
+                        <p class="setting-hint">支持自建后端 API，留空则使用浏览器本地存储（同浏览器可用）</p>
+                    </div>
+                    <div class="setting-item">
+                        <label>管理密码</label>
+                        <div class="setting-row">
+                            <input type="password" id="newPassword" placeholder="修改管理密码">
+                            <button class="btn btn-small btn-primary" onclick="Admin.changePassword()">修改</button>
+                        </div>
+                        <p class="setting-hint">默认密码: admin123</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" style="display:none"></div>
+
+    <script src="js/admin.js"></script>
+</body>
+</html>

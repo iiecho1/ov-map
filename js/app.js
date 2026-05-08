@@ -2,6 +2,32 @@ const DB_NAME = 'ov-map-db';
 const DB_VERSION = 1;
 const STORE_LAYERS = 'layers';
 const STORE_STATE = 'state';
+const CLOUD_DB_NAME = 'ov-map-cloud';
+const CLOUD_DB_VERSION = 1;
+const CLOUD_STORE = 'kml-files';
+
+const CloudReader = {
+    db: null,
+    async init() {
+        return new Promise(resolve => {
+            const req = indexedDB.open(CLOUD_DB_NAME, CLOUD_DB_VERSION);
+            req.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(CLOUD_STORE)) db.createObjectStore(CLOUD_STORE, { keyPath: 'id' });
+            };
+            req.onsuccess = e => { this.db = e.target.result; resolve(); };
+            req.onerror = () => resolve();
+        });
+    },
+    async getEnabledFiles() {
+        if (!this.db) return [];
+        return new Promise(resolve => {
+            const req = this.db.transaction(CLOUD_STORE, 'readonly').objectStore(CLOUD_STORE).getAll();
+            req.onsuccess = () => resolve((req.result || []).filter(f => f.enabled !== false));
+            req.onerror = () => resolve([]);
+        });
+    }
+};
 
 const Storage = {
     db: null,
@@ -90,37 +116,15 @@ L.GCJ02 = {
 };
 
 L.GCJ02TileLayer = L.TileLayer.extend({
-    _offset: null,
-    onAdd(map) {
-        L.TileLayer.prototype.onAdd.call(this, map);
-        this._updateOffset();
-        map.on('moveend zoomend', this._updateOffset, this);
-    },
-    onRemove(map) {
-        map.off('moveend zoomend', this._updateOffset, this);
-        this._resetOffset();
-        L.TileLayer.prototype.onRemove.call(this, map);
-    },
-    _updateOffset() {
-        if (!this._map) return;
-        const c = this._map.getCenter();
-        const z = this._map.getZoom();
+    getTileUrl(coords) {
+        const z = coords.z;
         const n = Math.pow(2, z);
-        const gcj = L.GCJ02.wgs84ToGcj02(c.lat, c.lng);
-        const wgsX = (c.lng + 180) / 360 * n * 256;
-        const wgsY = (1 - Math.log(Math.tan(c.lat * Math.PI / 180) + 1 / Math.cos(c.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
-        const gcjX = (gcj.lng + 180) / 360 * n * 256;
-        const gcjY = (1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n * 256;
-        const dx = Math.round(gcjX - wgsX);
-        const dy = Math.round(gcjY - wgsY);
-        const container = this.getContainer();
-        if (container) {
-            container.style.transform = `translate(${-dx}px,${-dy}px)`;
-        }
-    },
-    _resetOffset() {
-        const container = this.getContainer();
-        if (container) container.style.transform = '';
+        const lng = (coords.x + 0.5) / n * 360 - 180;
+        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (coords.y + 0.5) / n))) * 180 / Math.PI;
+        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
+        const gcjX = Math.floor((gcj.lng + 180) / 360 * n);
+        const gcjY = Math.floor((1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n);
+        return L.Util.template(this._url, L.extend({ s: this._getSubdomain(coords), x: gcjX, y: gcjY, z: z }, this.options));
     }
 });
 
@@ -156,6 +160,7 @@ const App = {
 
     async init() {
         await Storage.init();
+        await CloudReader.init();
         this.loadApiKey();
         this.initMap();
         this.initBaseLayers();
@@ -164,7 +169,8 @@ const App = {
         this.initLabelOverlay();
         this.initEventListeners();
         await this.restoreState();
-        this.restoreLayers();
+        await this.restoreLayers();
+        await this.loadCloudLayers();
     },
 
     initMap() {
@@ -624,21 +630,69 @@ const App = {
         if (s.layerOrder) this._layerOrder = s.layerOrder;
     },
 
+    async _runConcurrent(tasks, limit) {
+        let idx = 0;
+        const run = async () => {
+            while (idx < tasks.length) {
+                const i = idx++;
+                await tasks[i]();
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => run()));
+    },
+
     async restoreLayers() {
         const saved = await Storage.getAllLayers();
         if (!saved.length) return;
-        this.showLoading(`加载 ${saved.length} 个图层...`);
-        for (let i = 0; i < saved.length; i++) {
-            const item = saved[i];
-            this.showLoading(`加载 ${i + 1}/${saved.length}: ${item.name || ''}`);
+        const total = saved.length;
+        let done = 0;
+        this.showLoading(`并行加载 ${total} 个图层 (0/${total})...`);
+        const tasks = saved.map(item => async () => {
             try {
                 await this.renderLayerAsync(item.text, item.ext, item.name, item.id, item.colorIndex);
+                if (item.visible === false) {
+                    const d = this.importedLayers[item.id];
+                    if (d) { this.map.removeLayer(d.layer); d.visible = false; }
+                }
             } catch (e) { console.error('restore failed:', item.name, e); }
-            if (i + 1 < saved.length) await new Promise(r => setTimeout(r, 0));
-        }
+            done++;
+            this.showLoading(`并行加载图层 (${done}/${total})...`);
+        });
+        await this._runConcurrent(tasks, 4);
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
+    },
+
+    async loadCloudLayers() {
+        const files = await CloudReader.getEnabledFiles();
+        if (!files.length) return;
+        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
+        const newFiles = files.filter(f => !existingNames.has(f.name));
+        if (!newFiles.length) return;
+        const total = newFiles.length;
+        let done = 0;
+        this.showLoading(`并行加载 ${total} 个云端图层 (0/${total})...`);
+        const tasks = newFiles.map((f, i) => async () => {
+            try {
+                const layerId = 'cloud_' + Date.now() + '_' + i;
+                const ci = this.colorIndex++;
+                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
+                if (layer) {
+                    if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                    this.importedLayers[layerId]._cloud = true;
+                    this._layerOrder = this._layerOrder || [];
+                    this._layerOrder.push(layerId);
+                }
+            } catch (e) { console.error('cloud layer load failed:', f.name, e); }
+            done++;
+            this.showLoading(`并行加载云端图层 (${done}/${total})...`);
+        });
+        await this._runConcurrent(tasks, 4);
+        this.hideLoading();
+        this.updateImportedLayersList();
+        this.updateLabelOverlay();
+        this.debouncedSave();
     },
 
     switchBaseLayer(n) { if (this.currentBaseLayer) this.map.removeLayer(this.baseLayers[this.currentBaseLayer]); this.baseLayers[n].addTo(this.map); this.currentBaseLayer = n; },
@@ -910,7 +964,7 @@ const App = {
                 <input type="checkbox" ${d.visible !== false ? 'checked' : ''} onchange="App.toggleLayer('${id}',this.checked)">
                 <span class="layer-color-indicator" style="background:${d.color}"></span>
                 <div class="layer-item-info">
-                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${this.escH(d.name)}</span>
+                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${d._cloud ? '&#9729; ' : ''}${this.escH(d.name)}</span>
                     <div class="layer-actions">
                         <button title="上移" onclick="App.moveLayer('${id}',-1)" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
                         <button title="下移" onclick="App.moveLayer('${id}',1)" ${i === this._layerOrder.length - 1 ? 'disabled' : ''}>&#9660;</button>
@@ -993,7 +1047,7 @@ const App = {
             el.textContent = newName;
             const all = await Storage.getAllLayers();
             const saved = all.find(l => String(l.id) === String(id));
-            Storage.saveLayer(Number(id), { name: d.name, ext: d.ext, text: saved?.text || '', colorIndex: d.colorIndex });
+            if (saved) Storage.saveLayer(Number(id), { ...saved, name: d.name });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -1010,6 +1064,10 @@ const App = {
                 this.canvasRenderer._redrawBounds = null;
                 this.canvasRenderer._redraw();
             }
+            Storage.getAllLayers().then(all => {
+                const saved = all.find(l => String(l.id) === String(id));
+                if (saved) Storage.saveLayer(Number(id), { ...saved, visible: vis });
+            });
         }
     },
 
