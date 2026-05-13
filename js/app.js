@@ -51,6 +51,14 @@ const Storage = {
         if (!this.db) return;
         this.db.transaction(STORE_LAYERS, 'readwrite').objectStore(STORE_LAYERS).delete(id);
     },
+    getLayer(id) {
+        if (!this.db) return Promise.resolve(null);
+        return new Promise(resolve => {
+            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    },
     getAllLayers() {
         if (!this.db) return Promise.resolve([]);
         return new Promise(resolve => {
@@ -156,11 +164,19 @@ const App = {
     baseLayers: {}, currentBaseLayer: null,
     importedLayers: {}, drawnItems: null, drawControl: null,
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
-    colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [],
+    colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [], _flatLabelCache: null,
+    _dom: {},
+
+    _cacheDom() {
+        const ids = ['searchInput', 'searchResults', 'apiKeyBox', 'apiKeyInput', 'cursorPos', 'zoomLevel', 'contextMenu', 'ctxCoord', 'fileInput', 'importedLayers', 'measureResults', 'loadingOverlay'];
+        for (const id of ids) this._dom[id] = document.getElementById(id);
+    },
 
     async init() {
-        await Storage.init();
-        await CloudReader.init();
+        this._cacheDom();
+        this.showLoading('初始化中...');
+        await new Promise(r => requestAnimationFrame(r));
+        await Promise.all([Storage.init(), CloudReader.init()]);
         this.loadApiKey();
         this.initMap();
         this.initBaseLayers();
@@ -168,8 +184,7 @@ const App = {
         this.initLocateControl();
         this.initLabelOverlay();
         this.initEventListeners();
-        await this.restoreState();
-        await this.restoreLayers();
+        await Promise.all([this.restoreState(), this.restoreLayers()]);
         await this.loadCloudLayers();
     },
 
@@ -234,23 +249,17 @@ const App = {
                 ctx.textBaseline = 'middle';
                 ctx.font = '11px Microsoft YaHei,sans-serif';
 
-                for (const data of Object.values(App.importedLayers)) {
-                    if (!data._labelCache || !map.hasLayer(data.layer)) continue;
-                    for (const item of data._labelCache) {
-                        if (!item._c) {
-                            if (item.type === 'point') item._c = item.latlng;
-                            else if (item.bounds) item._c = item.bounds.getCenter();
-                            else continue;
-                        }
-                        if (!filterBounds.contains(item._c)) continue;
-                        const pt = map.latLngToContainerPoint(item._c);
-                        if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
-                        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-                        ctx.lineWidth = 3;
-                        ctx.strokeText(item.text, pt.x, pt.y);
-                        ctx.fillStyle = '#2c3e50';
-                        ctx.fillText(item.text, pt.x, pt.y);
-                    }
+                const items = App._getFlatLabelCache();
+                for (let k = 0; k < items.length; k++) {
+                    const item = items[k];
+                    if (!filterBounds.contains(item._c)) continue;
+                    const pt = map.latLngToContainerPoint(item._c);
+                    if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
+                    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+                    ctx.lineWidth = 3;
+                    ctx.strokeText(item.text, pt.x, pt.y);
+                    ctx.fillStyle = '#2c3e50';
+                    ctx.fillText(item.text, pt.x, pt.y);
                 }
             }
         });
@@ -259,7 +268,26 @@ const App = {
     },
 
     updateLabelOverlay() {
+        this._flatLabelCache = null;
         if (this.labelOverlay && this.labelOverlay._update) this.labelOverlay._update();
+    },
+
+    _getFlatLabelCache() {
+        if (this._flatLabelCache) return this._flatLabelCache;
+        const flat = [];
+        for (const data of Object.values(this.importedLayers)) {
+            if (!data._labelCache || !this.map.hasLayer(data.layer)) continue;
+            for (const item of data._labelCache) {
+                if (!item._c) {
+                    if (item.type === 'point') item._c = item.latlng;
+                    else if (item.bounds) item._c = item.bounds.getCenter();
+                    else continue;
+                }
+                flat.push(item);
+            }
+        }
+        this._flatLabelCache = flat;
+        return flat;
     },
 
     initBaseLayers() {
@@ -360,16 +388,16 @@ const App = {
     setSearchMode(mode) {
         this.searchMode = mode;
         document.querySelectorAll('.search-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-        const input = document.getElementById('searchInput');
+        const input = this._dom.searchInput;
         const placeholders = { place: '搜索地点...', layer: '搜索图层属性...', coord: '经度, 纬度 如: 118.63, 37.42' };
         input.placeholder = placeholders[mode] || '搜索...';
         input.value = '';
-        document.getElementById('searchResults').classList.remove('has-items');
-        document.getElementById('searchResults').innerHTML = '';
+        this._dom.searchResults.classList.remove('has-items');
+        this._dom.searchResults.innerHTML = '';
     },
 
     doSearch() {
-        const q = document.getElementById('searchInput').value.trim();
+        const q = this._dom.searchInput.value.trim();
         if (!q) return;
         if (this.searchMode === 'place') this.searchPlace(q);
         else if (this.searchMode === 'coord') this.searchCoord(q);
@@ -377,7 +405,7 @@ const App = {
     },
 
     searchCoord(query) {
-        const container = document.getElementById('searchResults');
+        const container = this._dom.searchResults;
 
         let nums = [];
         const dmsPattern = /(-?\d+(?:\.\d+)?)\s*[°度]\s*(\d+(?:\.\d+)?)?\s*['′分]?\s*(\d+(?:\.\d+)?)?\s*["″秒]?\s*[NSEW东北西南]?/gi;
@@ -423,20 +451,20 @@ const App = {
         container.classList.add('has-items');
     },
 
-    _gaodeKey: '',
+    _gaodeKey: '', _searchAbort: null,
 
     toggleApiKeyBox() {
-        const box = document.getElementById('apiKeyBox');
+        const box = this._dom.apiKeyBox;
         box.style.display = box.style.display === 'none' ? 'block' : 'none';
         if (box.style.display === 'block') {
-            document.getElementById('apiKeyInput').value = this._gaodeKey || '';
+            this._dom.apiKeyInput.value = this._gaodeKey || '';
         }
     },
 
     saveApiKey() {
-        this._gaodeKey = document.getElementById('apiKeyInput').value.trim();
+        this._gaodeKey = this._dom.apiKeyInput.value.trim();
         localStorage.setItem('gaode_key', this._gaodeKey);
-        document.getElementById('apiKeyBox').style.display = 'none';
+        this._dom.apiKeyBox.style.display = 'none';
         alert(this._gaodeKey ? 'API Key 已保存' : 'API Key 已清除');
     },
 
@@ -445,22 +473,27 @@ const App = {
     },
 
     async searchPlace(query) {
-        const container = document.getElementById('searchResults');
+        const container = this._dom.searchResults;
         if (!this._gaodeKey) {
             container.innerHTML = '<div class="search-hint">请先配置高德 API Key<br><br>免费申请地址:<br>console.amap.com/dev/key/app<br><br>创建应用 → 添加Key → 选"Web服务"<br><br>点击搜索框右侧 ⚙ 配置</div>';
             container.classList.add('has-items');
             return;
         }
+        if (this._searchAbort) this._searchAbort.abort();
+        this._searchAbort = new AbortController();
+        const signal = this._searchAbort.signal;
         container.innerHTML = '<div class="search-hint">搜索中...</div>';
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`).then(r => r.json()).catch(() => null);
+            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`, { signal }).then(r => r.json()).catch(() => null);
+            if (signal.aborted) return;
             const cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
             const cityName = cityResp?.regeocode?.addressComponent?.city || '';
             let url = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
             if (cityCode) url += `&city=${cityCode}&citylimit=true`;
-            const results = await fetch(url).then(r => r.json());
+            const results = await fetch(url, { signal }).then(r => r.json());
+            if (signal.aborted) return;
             if (!results.pois || !results.pois.length) { container.innerHTML = '<div class="search-hint">未找到结果</div>'; return; }
             container.innerHTML = (cityName ? `<div class="search-hint">搜索范围: ${cityName}</div>` : '') +
                 results.pois.slice(0, 8).map(p => {
@@ -470,18 +503,18 @@ const App = {
                 const addr = p.address ? (Array.isArray(p.address) ? p.address.join(' ') : p.address) : '';
                 return `<div class="search-result-item" onclick="App.goToPlace(${wgs.lat},${wgs.lng},\`${this.escA(p.name)}\`)"><div class="result-name">${this.escH(p.name)}</div><div class="result-sub">${this.escH(addr || p.cityname || '')}</div></div>`;
             }).join('');
-        } catch { container.innerHTML = '<div class="search-hint">搜索失败，请检查 API Key</div>'; }
+        } catch (e) { if (e.name !== 'AbortError') container.innerHTML = '<div class="search-hint">搜索失败，请检查 API Key</div>'; }
     },
 
     goToPlace(lat, lon, name) {
         this.map.setView([lat, lon], 16);
         if (this.searchMarker) this.map.removeLayer(this.searchMarker);
         this.searchMarker = L.marker([lat, lon]).addTo(this.map).bindPopup(name).openPopup();
-        document.getElementById('searchResults').classList.remove('has-items');
+        this._dom.searchResults.classList.remove('has-items');
     },
 
     searchLayer(query) {
-        const container = document.getElementById('searchResults');
+        const container = this._dom.searchResults;
         const q = query.toLowerCase();
         const matches = [];
         for (const [layerId, data] of Object.entries(this.importedLayers)) {
@@ -505,7 +538,7 @@ const App = {
         if (!m) return;
         if (m.latlng) this.map.setView(m.latlng, 17);
         if (m.layer.openPopup) m.layer.openPopup();
-        document.getElementById('searchResults').classList.remove('has-items');
+        this._dom.searchResults.classList.remove('has-items');
     },
 
     getCenter(sub, f) {
@@ -539,7 +572,7 @@ const App = {
     _ctxLatLng: null,
 
     hideContextMenu() {
-        document.getElementById('contextMenu').classList.remove('show');
+        this._dom.contextMenu.classList.remove('show');
     },
 
     copyCoord() {
@@ -589,21 +622,21 @@ const App = {
         document.getElementById('importGpx').addEventListener('click', () => this.triggerFileInput('.gpx'));
         document.getElementById('fileInput').addEventListener('change', e => this.handleFileImport(e));
 
-        const si = document.getElementById('searchInput');
+        const si = this._dom.searchInput;
         si.addEventListener('keydown', e => { if (e.key === 'Enter') this.doSearch(); });
         si.addEventListener('input', () => {
             clearTimeout(this.searchTimer);
-            if (!si.value.trim()) { document.getElementById('searchResults').classList.remove('has-items'); document.getElementById('searchResults').innerHTML = ''; return; }
+            if (!si.value.trim()) { this._dom.searchResults.classList.remove('has-items'); this._dom.searchResults.innerHTML = ''; return; }
             this.searchTimer = setTimeout(() => this.doSearch(), 400);
         });
-        document.addEventListener('click', e => { if (!e.target.closest('.search-box')) document.getElementById('searchResults').classList.remove('has-items'); });
+        document.addEventListener('click', e => { if (!e.target.closest('.search-box')) this._dom.searchResults.classList.remove('has-items'); });
         document.addEventListener('click', () => this.hideContextMenu());
         document.addEventListener('contextmenu', e => { if (e.target.closest('#map')) e.preventDefault(); });
 
         this.map.on('contextmenu', e => {
             this._ctxLatLng = e.latlng;
-            const menu = document.getElementById('contextMenu');
-            document.getElementById('ctxCoord').innerHTML =
+            const menu = this._dom.contextMenu;
+            this._dom.ctxCoord.innerHTML =
                 `经度: ${e.latlng.lng.toFixed(6)}<br>纬度: ${e.latlng.lat.toFixed(6)}`;
             menu.style.left = e.originalEvent.clientX + 'px';
             menu.style.top = e.originalEvent.clientY + 'px';
@@ -613,8 +646,8 @@ const App = {
             if (rect.bottom > window.innerHeight) menu.style.top = (e.originalEvent.clientY - rect.height) + 'px';
         });
 
-        this.map.on('mousemove', e => { document.getElementById('cursorPos').textContent = `经度: ${e.latlng.lng.toFixed(6)}, 纬度: ${e.latlng.lat.toFixed(6)}`; });
-        this.map.on('zoomend', () => { document.getElementById('zoomLevel').textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
+        this.map.on('mousemove', e => { this._dom.cursorPos.textContent = `经度: ${e.latlng.lng.toFixed(6)}, 纬度: ${e.latlng.lat.toFixed(6)}`; });
+        this.map.on('zoomend', () => { this._dom.zoomLevel.textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
         this.map.on('moveend', () => this.debouncedSave());
         this.map.on(L.Draw.Event.CREATED, e => { this.drawnItems.addLayer(e.layer); this.showMeasure(e.layerType, e.layer); });
         this.map.on(L.Draw.Event.EDITED, e => { e.layers.eachLayer(l => this.showMeasure(l.feature?.geometry?.type || 'polygon', l)); });
@@ -630,7 +663,7 @@ const App = {
         if (s.layerOrder) this._layerOrder = s.layerOrder;
     },
 
-    async _runConcurrent(tasks, limit) {
+    async _runConcurrent(tasks, limit = 8) {
         let idx = 0;
         const run = async () => {
             while (idx < tasks.length) {
@@ -658,7 +691,7 @@ const App = {
             done++;
             this.showLoading(`并行加载图层 (${done}/${total})...`);
         });
-        await this._runConcurrent(tasks, 4);
+        await this._runConcurrent(tasks, 8);
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
@@ -688,7 +721,7 @@ const App = {
             done++;
             this.showLoading(`并行加载云端图层 (${done}/${total})...`);
         });
-        await this._runConcurrent(tasks, 4);
+        await this._runConcurrent(tasks, 8);
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
@@ -735,23 +768,21 @@ const App = {
 
     enrichKml(geoJson, kmlDoc) {
         const sm = {};
-        const pms = [];
-        const all = kmlDoc.getElementsByTagName('*');
-        for (let i = 0; i < all.length; i++) {
-            const el = all[i];
-            const tag = el.tagName;
-            if (tag === 'Style') {
-                const id = el.getAttribute('id');
-                if (id) sm['#' + id] = this.parseStyle(el);
-            } else if (tag === 'StyleMap') {
-                const id = el.getAttribute('id');
-                if (!id) continue;
-                const p = el.querySelector('Pair');
-                if (p) { const u = p.querySelector('styleUrl'); if (u) { const ref = u.textContent.trim(); if (sm[ref]) sm['#' + id] = sm[ref]; } }
-            } else if (tag === 'Placemark') {
-                pms.push(el);
-            }
+        const styles = kmlDoc.getElementsByTagName('Style');
+        for (let i = 0; i < styles.length; i++) {
+            const el = styles[i];
+            const id = el.getAttribute('id');
+            if (id) sm['#' + id] = this.parseStyle(el);
         }
+        const styleMaps = kmlDoc.getElementsByTagName('StyleMap');
+        for (let i = 0; i < styleMaps.length; i++) {
+            const el = styleMaps[i];
+            const id = el.getAttribute('id');
+            if (!id) continue;
+            const p = el.querySelector('Pair');
+            if (p) { const u = p.querySelector('styleUrl'); if (u) { const ref = u.textContent.trim(); if (sm[ref]) sm['#' + id] = sm[ref]; } }
+        }
+        const pms = kmlDoc.getElementsByTagName('Placemark');
         for (let i = 0; i < pms.length && i < geoJson.features.length; i++) {
             const pm = pms[i], f = geoJson.features[i];
             const ist = pm.querySelector('Style');
@@ -824,7 +855,7 @@ const App = {
         const labelCache = [];
         const self = this;
         const group = L.featureGroup();
-        const CHUNK = 200;
+        const CHUNK = 500;
 
         for (let i = 0; i < total; i += CHUNK) {
             const end = Math.min(i + CHUNK, total);
@@ -862,18 +893,14 @@ const App = {
                 }
 
                 if (layer) {
+                    const html = self.getPopup(f);
+                    if (html) layer.bindPopup(html, { maxWidth: 450, maxHeight: 350 });
                     group.addLayer(layer);
                 }
             }
 
             if (i + CHUNK < total) await new Promise(r => setTimeout(r, 0));
         }
-
-        group.eachLayer(l => {
-            if (!l.feature) return;
-            const html = self.getPopup(l.feature);
-            if (html) l.bindPopup(html, { maxWidth: 450, maxHeight: 350 });
-        });
 
         group.addTo(this.map);
         this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
@@ -919,12 +946,12 @@ const App = {
     },
 
     showLoading(msg) {
-        let o = document.getElementById('loadingOverlay');
-        if (!o) { o = document.createElement('div'); o.id = 'loadingOverlay'; o.innerHTML = '<div class="loading-spinner"></div><div class="loading-text"></div>'; document.body.appendChild(o); }
+        let o = this._dom.loadingOverlay;
+        if (!o) { o = document.createElement('div'); o.id = 'loadingOverlay'; o.innerHTML = '<div class="loading-spinner"></div><div class="loading-text"></div>'; document.body.appendChild(o); this._dom.loadingOverlay = o; }
         o.querySelector('.loading-text').textContent = msg || '加载中...';
         o.style.display = 'flex';
     },
-    hideLoading() { const o = document.getElementById('loadingOverlay'); if (o) o.style.display = 'none'; },
+    hideLoading() { const o = this._dom.loadingOverlay; if (o) o.style.display = 'none'; },
 
     async handleFileImport(event) {
         const file = event.target.files[0];
@@ -950,7 +977,7 @@ const App = {
     },
 
     updateImportedLayersList() {
-        const c = document.getElementById('importedLayers');
+        const c = this._dom.importedLayers;
         const ids = Object.keys(this.importedLayers);
         if (!ids.length) { c.innerHTML = '<p class="empty-hint">暂无导入图层</p>'; return; }
         if (!this._layerOrder || !this._layerOrder.length) this._layerOrder = ids;
@@ -979,7 +1006,7 @@ const App = {
     _bindLayerDrag() {
         if (this._layerDragBound) return;
         this._layerDragBound = true;
-        const container = document.getElementById('importedLayers');
+        const container = this._dom.importedLayers;
         let dragId = null;
         container.addEventListener('dragstart', e => {
             const el = e.target.closest('.layer-item[draggable]');
@@ -1045,8 +1072,7 @@ const App = {
             const newName = input.value.trim() || d.name;
             d.name = newName;
             el.textContent = newName;
-            const all = await Storage.getAllLayers();
-            const saved = all.find(l => String(l.id) === String(id));
+            const saved = await Storage.getLayer(Number(id));
             if (saved) Storage.saveLayer(Number(id), { ...saved, name: d.name });
         };
         input.addEventListener('blur', finish);
@@ -1060,12 +1086,7 @@ const App = {
             if (vis) this.map.addLayer(d.layer);
             else this.map.removeLayer(d.layer);
             this.updateLabelOverlay();
-            if (this.canvasRenderer) {
-                this.canvasRenderer._redrawBounds = null;
-                this.canvasRenderer._redraw();
-            }
-            Storage.getAllLayers().then(all => {
-                const saved = all.find(l => String(l.id) === String(id));
+            Storage.getLayer(Number(id)).then(saved => {
                 if (saved) Storage.saveLayer(Number(id), { ...saved, visible: vis });
             });
         }
@@ -1084,7 +1105,7 @@ const App = {
     },
 
     showMeasure(type, layer) {
-        const c = document.getElementById('measureResults');
+        const c = this._dom.measureResults;
         let html = '';
         if (type === 'polyline') { const ll = layer.getLatLngs(); let d = 0; for (let i = 1; i < ll.length; i++) d += ll[i-1].distanceTo(ll[i]); html = `<div class="measure-result"><div class="label">线段</div><div class="value">长度: ${this.fmtD(d)}</div></div>`; }
         else if (type === 'polygon' || type === 'rectangle') { const ll = layer.getLatLngs()[0]; html = `<div class="measure-result"><div class="label">${type === 'rectangle' ? '矩形' : '多边形'}</div><div class="value">面积: ${this.fmtA(this.calcA(ll))}</div><div class="value">周长: ${this.fmtD(this.calcP(ll))}</div></div>`; }
@@ -1097,7 +1118,7 @@ const App = {
     fmtD(m) { return m >= 1000 ? (m/1000).toFixed(2)+' 公里' : m.toFixed(2)+' 米'; },
     fmtA(s) { if (s >= 1e6) return (s/1e6).toFixed(2)+' 平方公里'; if (s >= 1e4) return (s/1e4).toFixed(2)+' 公顷'; return s.toFixed(2)+' 平方米'; },
 
-    clearMeasurements() { this.drawnItems.clearLayers(); document.getElementById('measureResults').innerHTML = '<p class="empty-hint">使用绘图工具进行测量</p>'; },
+    clearMeasurements() { this.drawnItems.clearLayers(); this._dom.measureResults.innerHTML = '<p class="empty-hint">使用绘图工具进行测量</p>'; },
     async clearAllData() { if (!confirm('确定清除所有数据？')) return; await Storage.clearAll(); alert('已清除，请刷新页面'); }
 };
 
