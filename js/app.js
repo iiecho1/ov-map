@@ -178,19 +178,24 @@ const App = {
     },
 
     async init() {
-        this._cacheDom();
-        this.showLoading('初始化中...');
-        await new Promise(r => requestAnimationFrame(r));
-        await Promise.all([Storage.init(), CloudReader.init()]);
-        this.loadApiKey();
-        this.initMap();
-        this.initBaseLayers();
-        this.initDrawControl();
-        this.initLocateControl();
-        this.initLabelOverlay();
-        this.initEventListeners();
-        await Promise.all([this.restoreState(), this.restoreLayers()]);
-        await this.loadCloudLayers();
+        try {
+            this._cacheDom();
+            this.showLoading('初始化中...');
+            await new Promise(r => requestAnimationFrame(r));
+            await Promise.all([Storage.init(), CloudReader.init()]);
+            this.loadApiKey();
+            this.initMap();
+            this.initBaseLayers();
+            this.initDrawControl();
+            this.initLocateControl();
+            this.initLabelOverlay();
+            this.initEventListeners();
+            await Promise.all([this.restoreState(), this.restoreLayers()]);
+            await this.loadCloudLayers();
+        } catch (e) {
+            console.error('Init failed:', e);
+        }
+        this.hideLoading();
     },
 
     initMap() {
