@@ -45,11 +45,15 @@ const Storage = {
     },
     saveLayer(id, data) {
         if (!this.db) return;
-        this.db.transaction(STORE_LAYERS, 'readwrite').objectStore(STORE_LAYERS).put({ id, ...data });
+        const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+        tx.onerror = () => console.error('Storage: saveLayer failed', id);
+        tx.objectStore(STORE_LAYERS).put({ id, ...data });
     },
     removeLayer(id) {
         if (!this.db) return;
-        this.db.transaction(STORE_LAYERS, 'readwrite').objectStore(STORE_LAYERS).delete(id);
+        const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+        tx.onerror = () => console.error('Storage: removeLayer failed', id);
+        tx.objectStore(STORE_LAYERS).delete(id);
     },
     getLayer(id) {
         if (!this.db) return Promise.resolve(null);
@@ -165,6 +169,7 @@ const App = {
     importedLayers: {}, drawnItems: null, drawControl: null,
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
     colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [], _flatLabelCache: null,
+    _cursorRaf: null, _cursorLatest: null, _layerListRaf: null,
     _dom: {},
 
     _cacheDom() {
@@ -192,9 +197,9 @@ const App = {
         this.canvasRenderer = L.canvas({ padding: 0.1 });
         this.map = L.map('map', {
             center: [35.8617, 104.1954], zoom: 5, zoomControl: true,
-            preferCanvas: true
+            preferCanvas: true, renderer: this.canvasRenderer
         });
-        this.drawnItems = new L.FeatureGroup();
+        this.drawnItems = new L.FeatureGroup([], { renderer: this.canvasRenderer });
         this.map.addLayer(this.drawnItems);
     },
 
@@ -206,6 +211,13 @@ const App = {
                 const pane = map.getPane('overlayPane');
                 this._canvas = L.DomUtil.create('canvas', 'label-canvas');
                 this._canvas.style.cssText = 'position:absolute;pointer-events:none;';
+                this._ctx = this._canvas.getContext('2d');
+                this._ctx.textAlign = 'center';
+                this._ctx.textBaseline = 'middle';
+                this._ctx.font = '11px Microsoft YaHei,sans-serif';
+                this._ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+                this._ctx.lineWidth = 3;
+                this._ctx.fillStyle = '#2c3e50';
                 pane.appendChild(this._canvas);
                 map.on('moveend zoomend resize', this._throttledUpdate, this);
                 this._update();
@@ -230,10 +242,17 @@ const App = {
                     this._canvas.height = ch;
                     this._canvas.style.width = size.x + 'px';
                     this._canvas.style.height = size.y + 'px';
+                    const ctx = this._ctx;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.font = '11px Microsoft YaHei,sans-serif';
+                    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+                    ctx.lineWidth = 3;
+                    ctx.fillStyle = '#2c3e50';
                 }
                 const topLeft = map.containerPointToLayerPoint([0, 0]);
                 L.DomUtil.setPosition(this._canvas, topLeft);
-                const ctx = this._canvas.getContext('2d');
+                const ctx = this._ctx;
                 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.clearRect(0, 0, size.x, size.y);
 
@@ -245,20 +264,13 @@ const App = {
                 const filterBounds = L.latLngBounds([sw.lat - latPad, sw.lng - lngPad], [ne.lat + latPad, ne.lng + lngPad]);
                 const pad = 100;
 
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.font = '11px Microsoft YaHei,sans-serif';
-
                 const items = App._getFlatLabelCache();
                 for (let k = 0; k < items.length; k++) {
                     const item = items[k];
                     if (!filterBounds.contains(item._c)) continue;
                     const pt = map.latLngToContainerPoint(item._c);
                     if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
-                    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-                    ctx.lineWidth = 3;
                     ctx.strokeText(item.text, pt.x, pt.y);
-                    ctx.fillStyle = '#2c3e50';
                     ctx.fillText(item.text, pt.x, pt.y);
                 }
             }
@@ -361,7 +373,7 @@ const App = {
                     if (btn) btn.classList.remove('locating');
                 }
             };
-            script.src = `http://ip-api.com/json/?callback=${cb}&lang=zh-CN`;
+            script.src = `https://ip-api.com/json/?callback=${cb}&lang=zh-CN`;
             script.onerror = () => {
                 delete window[cb];
                 document.body.removeChild(script);
@@ -567,7 +579,7 @@ const App = {
     },
 
     escH(s) { return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') : ''; },
-    escA(s) { return s ? String(s).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$') : ''; },
+    escA(s) { return s ? String(s).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\(/g, '\\(').replace(/\)/g, '\\)') : ''; },
 
     _ctxLatLng: null,
 
@@ -629,8 +641,10 @@ const App = {
             if (!si.value.trim()) { this._dom.searchResults.classList.remove('has-items'); this._dom.searchResults.innerHTML = ''; return; }
             this.searchTimer = setTimeout(() => this.doSearch(), 400);
         });
-        document.addEventListener('click', e => { if (!e.target.closest('.search-box')) this._dom.searchResults.classList.remove('has-items'); });
-        document.addEventListener('click', () => this.hideContextMenu());
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.search-box')) this._dom.searchResults.classList.remove('has-items');
+            this.hideContextMenu();
+        });
         document.addEventListener('contextmenu', e => { if (e.target.closest('#map')) e.preventDefault(); });
 
         this.map.on('contextmenu', e => {
@@ -638,19 +652,36 @@ const App = {
             const menu = this._dom.contextMenu;
             this._dom.ctxCoord.innerHTML =
                 `经度: ${e.latlng.lng.toFixed(6)}<br>纬度: ${e.latlng.lat.toFixed(6)}`;
-            menu.style.left = e.originalEvent.clientX + 'px';
-            menu.style.top = e.originalEvent.clientY + 'px';
+            const cx = e.originalEvent.clientX, cy = e.originalEvent.clientY;
+            menu.style.left = cx + 'px';
+            menu.style.top = cy + 'px';
             menu.classList.add('show');
             const rect = menu.getBoundingClientRect();
-            if (rect.right > window.innerWidth) menu.style.left = (e.originalEvent.clientX - rect.width) + 'px';
-            if (rect.bottom > window.innerHeight) menu.style.top = (e.originalEvent.clientY - rect.height) + 'px';
+            if (rect.right > window.innerWidth) menu.style.left = Math.max(0, cx - rect.width) + 'px';
+            if (rect.bottom > window.innerHeight) menu.style.top = Math.max(0, cy - rect.height) + 'px';
+            if (rect.left < 0) { menu.style.left = '0px'; }
+            if (rect.top < 0) { menu.style.top = '0px'; }
         });
 
-        this.map.on('mousemove', e => { this._dom.cursorPos.textContent = `经度: ${e.latlng.lng.toFixed(6)}, 纬度: ${e.latlng.lat.toFixed(6)}`; });
+        this._cursorLatest = null;
+        this.map.on('mousemove', e => {
+            this._cursorLatest = e;
+            if (this._cursorRaf) return;
+            this._cursorRaf = requestAnimationFrame(() => {
+                this._cursorRaf = null;
+                const ev = this._cursorLatest;
+                if (ev) this._dom.cursorPos.textContent = `经度: ${ev.latlng.lng.toFixed(6)}, 纬度: ${ev.latlng.lat.toFixed(6)}`;
+            });
+        });
         this.map.on('zoomend', () => { this._dom.zoomLevel.textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
         this.map.on('moveend', () => this.debouncedSave());
         this.map.on(L.Draw.Event.CREATED, e => { this.drawnItems.addLayer(e.layer); this.showMeasure(e.layerType, e.layer); });
         this.map.on(L.Draw.Event.EDITED, e => { e.layers.eachLayer(l => this.showMeasure(l.feature?.geometry?.type || 'polygon', l)); });
+        this.map.on(L.Draw.Event.DRAWSTOP, () => {
+            this.map.dragging.enable();
+            this.map.tap && this.map.tap.enable();
+            if (this.map._container) this.map._container.style.pointerEvents = '';
+        });
     },
 
     debouncedSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => { const c = this.map.getCenter(); Storage.saveState({ center: [c.lat, c.lng], zoom: this.map.getZoom(), baseLayer: this.currentBaseLayer, layerOrder: this._layerOrder || [] }); }, 300); },
@@ -782,16 +813,14 @@ const App = {
             const p = el.querySelector('Pair');
             if (p) { const u = p.querySelector('styleUrl'); if (u) { const ref = u.textContent.trim(); if (sm[ref]) sm['#' + id] = sm[ref]; } }
         }
-        const pms = kmlDoc.getElementsByTagName('Placemark');
-        for (let i = 0; i < pms.length && i < geoJson.features.length; i++) {
-            const pm = pms[i], f = geoJson.features[i];
+
+        const apply = (pm, f) => {
             const ist = pm.querySelector('Style');
             if (ist) f.properties._kmlStyle = this.parseStyle(ist);
             const su = pm.querySelector('styleUrl');
             if (su) { const ref = su.textContent.trim(); f.properties._styleUrl = ref; if (!f.properties._kmlStyle && sm[ref]) f.properties._kmlStyle = sm[ref]; }
             const de = pm.querySelector('description');
             if (de) f.properties._kmlDescription = de.textContent.trim();
-
             const gt = f.geometry?.type;
             if ((gt === 'Point' || gt === 'MultiPoint') && !f.properties._kmlStyle?._hideMarker) {
                 const hasLabelProp = 'label-opacity' in f.properties || 'label-color' in f.properties || 'label-scale' in f.properties;
@@ -800,6 +829,22 @@ const App = {
                     if (!f.properties._kmlStyle) f.properties._kmlStyle = {};
                     f.properties._kmlStyle._hideMarker = true;
                 }
+            }
+        };
+
+        const pms = kmlDoc.getElementsByTagName('Placemark');
+        if (pms.length === geoJson.features.length) {
+            for (let i = 0; i < pms.length; i++) apply(pms[i], geoJson.features[i]);
+        } else {
+            const fByName = new Map();
+            for (const f of geoJson.features) {
+                const n = f.properties?.name;
+                if (n) fByName.set(n, f);
+            }
+            for (let i = 0; i < pms.length; i++) {
+                const pm = pms[i];
+                const nm = pm.querySelector('name');
+                if (nm) { const f = fByName.get(nm.textContent.trim()); if (f) apply(pm, f); }
             }
         }
     },
@@ -855,10 +900,13 @@ const App = {
         const labelCache = [];
         const self = this;
         const group = L.featureGroup();
-        const CHUNK = 500;
 
-        for (let i = 0; i < total; i += CHUNK) {
-            const end = Math.min(i + CHUNK, total);
+        let i = 0;
+        let chunkSize = 500;
+        let lastTime = performance.now();
+
+        while (i < total) {
+            const end = Math.min(i + chunkSize, total);
             if (onProgress) onProgress(`渲染 ${end}/${total}...`);
 
             for (let j = i; j < end; j++) {
@@ -899,50 +947,18 @@ const App = {
                 }
             }
 
-            if (i + CHUNK < total) await new Promise(r => setTimeout(r, 0));
+            i = end;
+            if (i < total) {
+                const elapsed = performance.now() - lastTime;
+                chunkSize = elapsed < 8 ? Math.min(2000, chunkSize * 2) : elapsed > 30 ? Math.max(200, Math.floor(chunkSize / 2)) : chunkSize;
+                lastTime = performance.now();
+                await new Promise(r => requestAnimationFrame(r));
+            }
         }
 
         group.addTo(this.map);
         this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
         return group;
-    },
-
-    renderLayer(text, ext, fileName, layerId, ci) {
-        const fallback = this.layerColors[ci % this.layerColors.length];
-        let geoJson = null;
-        if (ext === 'kml') {
-            const doc = new DOMParser().parseFromString(text, 'text/xml');
-            geoJson = toGeoJSON.kml(doc);
-            this.enrichKml(geoJson, doc);
-        } else if (ext === 'geojson' || ext === 'json') {
-            geoJson = JSON.parse(text);
-        } else if (ext === 'gpx') {
-            geoJson = toGeoJSON.gpx(new DOMParser().parseFromString(text, 'text/xml'));
-        }
-        if (!geoJson) return null;
-
-        const self = this;
-        const labelCache = [];
-        const layer = L.geoJSON(geoJson, {
-            renderer: self.canvasRenderer,
-            style: f => self.getStyle(f, fallback),
-            pointToLayer: (f, ll) => {
-                const ks = f.properties?._kmlStyle;
-                if (ks?._hideMarker) { labelCache.push({ text: f.properties?.name || '', latlng: ll, type: 'point' }); return null; }
-                const m = L.circleMarker(ll, { renderer: self.canvasRenderer, radius: 6, fillColor: ks?.markerColor || fallback, color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.8 });
-                if (f.properties?.name) labelCache.push({ text: f.properties.name, latlng: ll, type: 'point' });
-                return m;
-            },
-            onEachFeature: (f, l) => {
-                const html = self.getPopup(f);
-                if (html) l.bindPopup(html, { maxWidth: 450, maxHeight: 350 });
-                if ((f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon') && f.properties?.name)
-                    labelCache.push({ text: f.properties.name, bounds: l.getBounds(), type: 'polygon' });
-            }
-        });
-        layer.addTo(this.map);
-        this.importedLayers[layerId] = { layer, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
-        return layer;
     },
 
     showLoading(msg) {
@@ -977,6 +993,13 @@ const App = {
     },
 
     updateImportedLayersList() {
+        if (this._layerListRaf) return;
+        this._layerListRaf = requestAnimationFrame(() => {
+            this._layerListRaf = null;
+            this._doUpdateImportedLayersList();
+        });
+    },
+    _doUpdateImportedLayersList() {
         const c = this._dom.importedLayers;
         const ids = Object.keys(this.importedLayers);
         if (!ids.length) { c.innerHTML = '<p class="empty-hint">暂无导入图层</p>'; return; }
