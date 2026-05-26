@@ -177,10 +177,10 @@ input[type="range"] {
   background: rgba(124,140,248,.07);
 }
 .file-zone input[type="file"] {
-  position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 1;
 }
-.file-zone .icon { font-size: 32px; display: block; margin-bottom: 6px; opacity: .8; }
-.file-zone .hint { font-size: 12px; color: var(--text-muted); }
+.file-zone .icon { font-size: 32px; display: block; margin-bottom: 6px; opacity: .8; pointer-events: none; }
+.file-zone .hint { font-size: 12px; color: var(--text-muted); pointer-events: none; }
 .file-zone .hint strong { color: var(--accent); }
 
 /* Buttons */
