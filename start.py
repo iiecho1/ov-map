@@ -14,6 +14,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/admin' or self.path == '/admin/':
             self.path = '/admin.html'
+        elif self.path == '/kml' or self.path == '/kml/':
+            self.path = '/kml.html'
         return super().do_GET()
 
 if __name__ == "__main__":
