@@ -61,7 +61,9 @@
                 </div>
             </div>
             <div class="layer-section">
-                <h4>导入图层</h4>
+                <h4>导入图层
+                    <button class="btn-cloud-sync" onclick="App.openCloudSync()" title="从云端同步图层">&#8635; 云端同步</button>
+                </h4>
                 <div class="import-buttons">
                     <button id="importKml" class="btn btn-primary">导入 KML</button>
                     <button id="importGeoJson" class="btn btn-primary">导入 GeoJSON</button>
@@ -103,6 +105,20 @@
             <button onclick="App.copyCoord()">复制坐标</button>
             <button onclick="App.searchFromCtx()">搜索附近</button>
             <button onclick="App.addMarkerFromCtx()">添加标记</button>
+        </div>
+    </div>
+
+    <div id="cloudSyncModal" class="modal-overlay" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">&#9729; 云端图层同步</span>
+                <button class="modal-close" onclick="App.closeCloudSync()">&times;</button>
+            </div>
+            <div class="modal-body" id="cloudFileList"></div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="App.syncSelectedCloudFiles()">同步选中</button>
+                <button class="btn" onclick="App.closeCloudSync()" style="background:#4a6278;color:#ecf0f1">关闭</button>
+            </div>
         </div>
     </div>
 

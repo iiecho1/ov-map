@@ -313,6 +313,179 @@ body {
     font-size: 12px;
 }
 
+.btn-small:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-xs {
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+}
+
+.btn-warn {
+    background: #f39c12;
+    color: #fff;
+}
+
+.btn-warn:hover {
+    background: #d68910;
+}
+
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.file-count {
+    font-size: 12px;
+    color: #95a5a6;
+}
+
+.file-disabled {
+    opacity: 0.55;
+}
+
+.file-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.rename-input {
+    background: #1a1a2e;
+    border: 1px solid #3498db;
+    color: #ecf0f1;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    outline: none;
+    width: 100%;
+    max-width: 300px;
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 10002;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.modal {
+    background: #16213e;
+    border-radius: 12px;
+    width: 520px;
+    max-width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    border: 1px solid #2c3e50;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #2c3e50;
+    background: #0f3460;
+    border-radius: 12px 12px 0 0;
+}
+
+.modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ecf0f1;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: #95a5a6;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #ecf0f1;
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #2c3e50;
+    justify-content: flex-end;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 8px 12px;
+    margin-bottom: 16px;
+}
+
+.detail-label {
+    font-size: 12px;
+    color: #95a5a6;
+    text-align: right;
+    padding-top: 2px;
+}
+
+.detail-value {
+    font-size: 13px;
+    color: #ecf0f1;
+    word-break: break-all;
+}
+
+.detail-mono {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    color: #95a5a6;
+}
+
+.detail-preview {
+    background: #1a1a2e;
+    border-radius: 6px;
+    border: 1px solid #2c3e50;
+    overflow: hidden;
+}
+
+.detail-preview-title {
+    font-size: 12px;
+    color: #95a5a6;
+    padding: 8px 12px;
+    background: #0f3460;
+    border-bottom: 1px solid #2c3e50;
+}
+
+.detail-preview pre {
+    padding: 12px;
+    font-size: 11px;
+    color: #bdc3c7;
+    font-family: 'Consolas', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 0;
+}
+
 .file-list {
     display: flex;
     flex-direction: column;
@@ -443,6 +616,35 @@ body {
     margin-top: 6px;
 }
 
+.api-status {
+    font-size: 12px;
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    display: none;
+}
+
+.api-status.checking {
+    display: block;
+    background: rgba(52, 152, 219, 0.1);
+    color: #3498db;
+    border: 1px solid rgba(52, 152, 219, 0.2);
+}
+
+.api-status.success {
+    display: block;
+    background: rgba(46, 204, 113, 0.1);
+    color: #2ecc71;
+    border: 1px solid rgba(46, 204, 113, 0.2);
+}
+
+.api-status.error {
+    display: block;
+    background: rgba(231, 76, 60, 0.1);
+    color: #e74c3c;
+    border: 1px solid rgba(231, 76, 60, 0.2);
+}
+
 .toast {
     position: fixed;
     bottom: 30px;
@@ -513,7 +715,22 @@ body {
     }
     .file-actions {
         width: 100%;
-        justify-content: flex-end;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+    .file-actions .btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+    .rename-input {
+        max-width: 100%;
+    }
+    .modal {
+        width: 100%;
+        max-height: 90vh;
+    }
+    .detail-grid {
+        grid-template-columns: 80px 1fr;
     }
     .setting-row {
         flex-direction: column;

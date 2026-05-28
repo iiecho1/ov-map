@@ -26,6 +26,23 @@ const CloudReader = {
             req.onsuccess = () => resolve((req.result || []).filter(f => f.enabled !== false));
             req.onerror = () => resolve([]);
         });
+    },
+    async getAllFiles() {
+        if (!this.db) return [];
+        return new Promise(resolve => {
+            const req = this.db.transaction(CLOUD_STORE, 'readonly').objectStore(CLOUD_STORE).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+        });
+    },
+    async save(fileData) {
+        if (!this.db) throw new Error('存储未初始化');
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(CLOUD_STORE, 'readwrite');
+            tx.objectStore(CLOUD_STORE).put(fileData);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(new Error('保存失败'));
+        });
     }
 };
 
@@ -1267,6 +1284,72 @@ const App = {
 
     clearMeasurements() { this.drawnItems.clearLayers(); this._dom.measureResults.innerHTML = '<p class="empty-hint">使用绘图工具进行测量</p>'; },
     async clearAllData() { if (!confirm('确定清除所有数据？')) return; await Storage.clearAll(); alert('已清除，请刷新页面'); },
+
+    async openCloudSync() {
+        const modal = document.getElementById('cloudSyncModal');
+        const list = document.getElementById('cloudFileList');
+        list.innerHTML = '<div class="cloud-sync-hint">加载中...</div>';
+        modal.style.display = 'flex';
+
+        const files = await CloudReader.getAllFiles();
+        if (!files.length) {
+            list.innerHTML = '<div class="cloud-sync-hint">暂无云端图层文件<br><small>可在管理后台上传 KML 文件</small></div>';
+            return;
+        }
+        files.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
+
+        list.innerHTML = '<div class="cloud-file-list">' + files.map(f => {
+            const size = f.size ? (f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB') : '';
+            const date = f.createdAt ? new Date(f.createdAt).toLocaleDateString('zh-CN') : '';
+            const imported = existingNames.has(f.name);
+            return `<label class="cloud-file-item${imported ? ' imported' : ''}" data-id="${f.id}">
+                <input type="checkbox" value="${f.id}" ${imported ? 'disabled' : ''}>
+                <div class="cloud-file-info">
+                    <div class="cloud-file-name">${this.escH(f.name)}${imported ? ' <small style="color:#2ecc71">(已导入)</small>' : ''}</div>
+                    <div class="cloud-file-meta">${[size, date].filter(Boolean).join(' · ')}</div>
+                </div>
+            </label>`;
+        }).join('') + '</div>';
+    },
+
+    closeCloudSync() {
+        document.getElementById('cloudSyncModal').style.display = 'none';
+    },
+
+    async syncSelectedCloudFiles() {
+        const checks = document.querySelectorAll('#cloudFileList input[type="checkbox"]:checked:not(:disabled)');
+        if (!checks.length) { alert('请选择要同步的图层'); return; }
+
+        this.closeCloudSync();
+        const ids = Array.from(checks).map(cb => cb.value);
+        const files = await CloudReader.getAllFiles();
+        const toImport = files.filter(f => ids.includes(f.id));
+        if (!toImport.length) return;
+
+        const total = toImport.length;
+        let done = 0;
+        this.showLoading(`同步云端图层 (${done}/${total})...`);
+
+        for (const f of toImport) {
+            try {
+                const layerId = 'cloud_' + Date.now() + '_' + done;
+                const ci = this.colorIndex++;
+                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
+                if (layer && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                this._layerOrder = this._layerOrder || [];
+                this._layerOrder.push(layerId);
+                await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci });
+            } catch (e) { console.error('同步失败:', f.name, e); }
+            done++;
+            this.showLoading(`同步云端图层 (${done}/${total})...`);
+        }
+
+        this.hideLoading();
+        this.updateImportedLayersList();
+        this.updateLabelOverlay();
+        this.debouncedSave();
+    },
 
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');

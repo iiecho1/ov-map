@@ -61,8 +61,11 @@
 
             <div class="admin-section">
                 <div class="section-header">
-                    <h3>云端 KML 文件列表</h3>
-                    <button class="btn btn-small btn-primary" onclick="Admin.refreshList()">刷新</button>
+                    <h3>云端 KML 文件清单</h3>
+                    <div class="section-actions">
+                        <span id="fileCount" class="file-count"></span>
+                        <button class="btn btn-small btn-primary" onclick="Admin.refreshList()">&#8635; 刷新</button>
+                    </div>
                 </div>
                 <div id="kmlFileList" class="file-list">
                     <p class="empty-hint">暂无云端 KML 文件</p>
@@ -78,8 +81,9 @@
                         <label>云端 API 地址（可选）</label>
                         <div class="setting-row">
                             <input type="text" id="cloudApiUrl" placeholder="留空使用本地 IndexedDB 存储，填入 API 地址使用云端存储">
-                            <button class="btn btn-small btn-primary" onclick="Admin.saveCloudApi()">保存</button>
+                            <button class="btn btn-small btn-primary" id="btnSaveApi" onclick="Admin.saveCloudApi()">保存</button>
                         </div>
+                        <div id="apiStatus" class="api-status"></div>
                         <p class="setting-hint">支持自建后端 API，留空则使用浏览器本地存储（同浏览器可用）</p>
                     </div>
                     <div class="setting-item">
@@ -92,6 +96,17 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="fileModal" class="modal-overlay" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">文件详情</span>
+                <button class="modal-close" onclick="Admin.closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
         </div>
     </div>
 

@@ -461,8 +461,9 @@ input[type="range"] {
 
     <!-- 操作区 -->
     <div class="card" id="generateSection" style="display:none">
-      <div class="card-body text-center">
+      <div class="card-body text-center" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-success" id="btnExport" style="padding:10px 32px;font-size:14px">生成并导出 KML</button>
+        <button class="btn btn-primary" id="btnSyncCloud" style="padding:10px 24px;font-size:14px">&#9729; 同步到云端</button>
       </div>
     </div>
 
@@ -524,6 +525,7 @@ let originalSheetData = [];
 let currentSheetData = [];
 let currentHeaders = [];
 let sourceFileName = '';
+let lastKmlData = null;
 
 const DEFAULT_COLORS = ['#ffff80','#00ff00','#8000ff','#ff0080','#00ffff','#ff8000','#80ff00','#0080ff','#ff0000','#00ff80'];
 const $ = id => document.getElementById(id);
@@ -902,6 +904,7 @@ function exportKML() {
   const sheetName = $('sheetSelect').value || 'Sheet1';
   a.download = (sourceFileName || 'layer_export') + '_' + sheetName + '.kml'; a.click(); URL.revokeObjectURL(a.href);
   $('statusLeft').textContent = '已导出 KML，' + count + ' 个要素';
+  lastKmlData = { text: kml, name: a.download, size: new Blob([kml]).size };
 }
 
 function renderErrors(errors) {
@@ -1044,6 +1047,51 @@ function applyConfig(config) {
 }
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+const CLOUD_DB_NAME = 'ov-map-cloud';
+const CLOUD_DB_VERSION = 1;
+const CLOUD_STORE = 'kml-files';
+let cloudDb = null;
+
+function initCloudDb() {
+  return new Promise(resolve => {
+    const req = indexedDB.open(CLOUD_DB_NAME, CLOUD_DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(CLOUD_STORE)) db.createObjectStore(CLOUD_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = e => { cloudDb = e.target.result; resolve(); };
+    req.onerror = () => resolve();
+  });
+}
+
+initCloudDb();
+
+$('btnSyncCloud').addEventListener('click', async () => {
+  if (!lastKmlData) { alert('请先生成 KML 文件'); return; }
+  if (!cloudDb) { alert('云端存储未就绪，请稍后重试'); return; }
+  try {
+    const id = 'cloud_' + Date.now();
+    const tx = cloudDb.transaction(CLOUD_STORE, 'readwrite');
+    tx.objectStore(CLOUD_STORE).put({
+      id,
+      name: lastKmlData.name,
+      text: lastKmlData.text,
+      ext: 'kml',
+      size: lastKmlData.size,
+      enabled: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    tx.oncomplete = () => {
+      $('statusLeft').textContent = '已同步到云端: ' + lastKmlData.name;
+      alert('已同步到云端，可在主页面「云端同步」中导入');
+    };
+    tx.onerror = () => alert('同步失败');
+  } catch (err) {
+    alert('同步失败: ' + err.message);
+  }
+});
 </script>
 </body>
 </html>
