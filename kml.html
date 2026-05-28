@@ -462,8 +462,9 @@ input[type="range"] {
     <!-- 操作区 -->
     <div class="card" id="generateSection" style="display:none">
       <div class="card-body text-center" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn-success" id="btnExport" style="padding:10px 32px;font-size:14px">生成并导出 KML</button>
-        <button class="btn btn-primary" id="btnSyncCloud" style="padding:10px 24px;font-size:14px">&#9729; 同步到云端</button>
+        <button class="btn btn-success" id="btnGenerate" style="padding:10px 32px;font-size:14px">生成 KML</button>
+        <button class="btn btn-primary" id="btnExport" style="padding:10px 32px;font-size:14px">导出 KML</button>
+        <button class="btn btn-warning" id="btnSyncCloud" style="padding:10px 24px;font-size:14px">&#9729; 同步</button>
       </div>
     </div>
 
@@ -784,10 +785,19 @@ function makeTrianglePoints(lat, lng, azimuth, halfAngle, radius) {
   return [[lat,lng],[lat+toDLat(radius)*Math.cos(l),lng+toDLng(radius)*Math.sin(l)],[lat+toDLat(radius)*Math.cos(m),lng+toDLng(radius)*Math.sin(m)],[lat+toDLat(radius)*Math.cos(ri),lng+toDLng(radius)*Math.sin(ri)],[lat,lng]];
 }
 
+$('btnGenerate').addEventListener('click', () => {
+  if (!currentSheetData.length) {alert('请先导入数据'); return;}
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在生成 KML...';
+  overlay.classList.add('show');
+  setTimeout(() => {
+    generateKML();
+    overlay.classList.remove('show');
+  }, 50);
+});
 $('btnExport').addEventListener('click', exportKML);
 
-function exportKML() {
-  if (!currentSheetData.length) {alert('请先导入数据'); return;}
+function generateKML() {
   const labelCol = $('labelCol').value, lngCol = $('lngCol').value, latCol = $('latCol').value, azimuthCol = $('azimuthCol').value;
   const defAngle = parseInt($('sectorAngle').value), defRadius = parseInt($('sectorRadius').value);
   const defFillColor = $('defaultFillColor').value, defShape = $('defaultShape').value;
@@ -899,12 +909,18 @@ function exportKML() {
   });
   kml += '</Folder></Document></kml>';
 
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([kml],{type:'application/vnd.google-earth.kml+xml'}));
   const sheetName = $('sheetSelect').value || 'Sheet1';
-  a.download = (sourceFileName || 'layer_export') + '_' + sheetName + '.kml'; a.click(); URL.revokeObjectURL(a.href);
-  $('statusLeft').textContent = '已导出 KML，' + count + ' 个要素';
-  lastKmlData = { text: kml, name: a.download, size: new Blob([kml]).size };
+  const fileName = (sourceFileName || 'layer_export') + '_' + sheetName + '.kml';
+  lastKmlData = { text: kml, name: fileName, size: new Blob([kml]).size };
+  $('statusLeft').textContent = '已生成 KML，' + count + ' 个要素，可导出或同步';
+}
+
+function exportKML() {
+  if (!lastKmlData) {alert('请先点击「生成 KML」'); return;}
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lastKmlData.text],{type:'application/vnd.google-earth.kml+xml'}));
+  a.download = lastKmlData.name; a.click(); URL.revokeObjectURL(a.href);
+  $('statusLeft').textContent = '已导出 KML: ' + lastKmlData.name;
 }
 
 function renderErrors(errors) {
@@ -1068,28 +1084,69 @@ function initCloudDb() {
 initCloudDb();
 
 $('btnSyncCloud').addEventListener('click', async () => {
-  if (!lastKmlData) { alert('请先生成 KML 文件'); return; }
-  if (!cloudDb) { alert('云端存储未就绪，请稍后重试'); return; }
+  if (!lastKmlData) { alert('请先点击「生成 KML」'); return; }
+
+  const savedApi = localStorage.getItem('ov-map-cloud-api') || '';
+  const input = prompt('请输入后端 API 地址（如 http://localhost:3000）\n留空则保存到浏览器数据', savedApi);
+  if (input === null) return;
+
+  const apiUrl = input.trim().replace(/\/+$/, '');
+  if (!apiUrl) {
+    if (!cloudDb) { alert('本地存储未就绪，请稍后重试'); return; }
+    try {
+      const id = 'cloud_' + Date.now();
+      const tx = cloudDb.transaction(CLOUD_STORE, 'readwrite');
+      tx.objectStore(CLOUD_STORE).put({
+        id,
+        name: lastKmlData.name,
+        text: lastKmlData.text,
+        ext: 'kml',
+        size: lastKmlData.size,
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      tx.oncomplete = () => {
+        $('statusLeft').textContent = '已保存到浏览器: ' + lastKmlData.name;
+        alert('已保存到浏览器数据，可在主页面「云端同步」中导入');
+      };
+      tx.onerror = () => alert('保存失败');
+    } catch (err) {
+      alert('保存失败: ' + err.message);
+    }
+    return;
+  }
+
+  localStorage.setItem('ov-map-cloud-api', apiUrl);
   try {
-    const id = 'cloud_' + Date.now();
-    const tx = cloudDb.transaction(CLOUD_STORE, 'readwrite');
-    tx.objectStore(CLOUD_STORE).put({
-      id,
-      name: lastKmlData.name,
-      text: lastKmlData.text,
-      ext: 'kml',
-      size: lastKmlData.size,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+    const resp = await fetch(apiUrl + '/api/health', { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data || data.status !== 'ok') throw new Error('服务状态异常');
+  } catch (e) {
+    alert('无法连接后端: ' + e.message);
+    return;
+  }
+
+  try {
+    const uploadResp = await fetch(apiUrl + '/api/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: lastKmlData.name,
+        text: lastKmlData.text,
+        ext: 'kml'
+      })
     });
-    tx.oncomplete = () => {
-      $('statusLeft').textContent = '已同步到云端: ' + lastKmlData.name;
-      alert('已同步到云端，可在主页面「云端同步」中导入');
-    };
-    tx.onerror = () => alert('同步失败');
-  } catch (err) {
-    alert('同步失败: ' + err.message);
+    if (uploadResp.ok) {
+      $('statusLeft').textContent = '已同步到后端: ' + lastKmlData.name;
+      alert('已同步到后端服务器，可在主页面「云端同步」中导入');
+    } else {
+      const err = await uploadResp.json().catch(() => ({}));
+      alert('同步失败: ' + (err.error || 'HTTP ' + uploadResp.status));
+    }
+  } catch (e) {
+    alert('同步失败: ' + e.message);
   }
 });
 </script>

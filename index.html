@@ -111,10 +111,26 @@
     <div id="cloudSyncModal" class="modal-overlay" style="display:none">
         <div class="modal">
             <div class="modal-header">
-                <span class="modal-title">&#9729; 云端图层同步</span>
+                <span class="modal-title">&#9729; 图层同步</span>
                 <button class="modal-close" onclick="App.closeCloudSync()">&times;</button>
             </div>
-            <div class="modal-body" id="cloudFileList"></div>
+            <div class="modal-body">
+                <div class="cloud-tabs">
+                    <button class="cloud-tab active" data-tab="cloud" onclick="App.switchCloudTab('cloud')">云端数据</button>
+                    <button class="cloud-tab" data-tab="local" onclick="App.switchCloudTab('local')">浏览器数据</button>
+                </div>
+                <div class="cloud-tab-content active" id="cloudTabCloud">
+                    <div class="cloud-api-bar">
+                        <input type="text" id="cloudApiInput" placeholder="后端 API 地址，如 http://localhost:3000" />
+                        <button onclick="App.connectCloudApi()">连接</button>
+                    </div>
+                    <div id="cloudApiStatus"></div>
+                    <div id="cloudRemoteFileList"></div>
+                </div>
+                <div class="cloud-tab-content" id="cloudTabLocal">
+                    <div id="cloudLocalFileList"></div>
+                </div>
+            </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" onclick="App.syncSelectedCloudFiles()">同步选中</button>
                 <button class="btn" onclick="App.closeCloudSync()" style="background:#4a6278;color:#ecf0f1">关闭</button>

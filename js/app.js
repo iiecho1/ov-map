@@ -1285,26 +1285,100 @@ const App = {
     clearMeasurements() { this.drawnItems.clearLayers(); this._dom.measureResults.innerHTML = '<p class="empty-hint">使用绘图工具进行测量</p>'; },
     async clearAllData() { if (!confirm('确定清除所有数据？')) return; await Storage.clearAll(); alert('已清除，请刷新页面'); },
 
+    _remoteFiles: [],
+    _cloudTab: 'cloud',
+
     async openCloudSync() {
         const modal = document.getElementById('cloudSyncModal');
-        const list = document.getElementById('cloudFileList');
-        list.innerHTML = '<div class="cloud-sync-hint">加载中...</div>';
         modal.style.display = 'flex';
 
+        const apiInput = document.getElementById('cloudApiInput');
+        apiInput.value = localStorage.getItem('ov-map-cloud-api') || '';
+
+        this.switchCloudTab('cloud');
+        this._loadLocalCloudFiles();
+
+        if (apiInput.value.trim()) {
+            this.connectCloudApi();
+        }
+    },
+
+    closeCloudSync() {
+        document.getElementById('cloudSyncModal').style.display = 'none';
+    },
+
+    switchCloudTab(tab) {
+        this._cloudTab = tab;
+        document.querySelectorAll('.cloud-tab').forEach(el => {
+            el.classList.toggle('active', el.dataset.tab === tab);
+        });
+        document.getElementById('cloudTabCloud').classList.toggle('active', tab === 'cloud');
+        document.getElementById('cloudTabLocal').classList.toggle('active', tab === 'local');
+    },
+
+    async connectCloudApi() {
+        const apiInput = document.getElementById('cloudApiInput');
+        const statusEl = document.getElementById('cloudApiStatus');
+        const listEl = document.getElementById('cloudRemoteFileList');
+        const apiUrl = (apiInput.value || '').trim().replace(/\/+$/, '');
+
+        if (!apiUrl) {
+            statusEl.innerHTML = '';
+            listEl.innerHTML = '<div class="cloud-sync-hint">请输入后端 API 地址</div>';
+            return;
+        }
+
+        statusEl.innerHTML = '<span style="color:#95a5a6">连接中...</span>';
+        statusEl.className = 'cloud-api-status';
+        listEl.innerHTML = '';
+
+        try {
+            const resp = await fetch(apiUrl + '/api/health', { signal: AbortSignal.timeout(3000) });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (!data || data.status !== 'ok') throw new Error('服务状态异常');
+        } catch (e) {
+            statusEl.innerHTML = '连接失败: ' + e.message;
+            statusEl.className = 'cloud-api-status err';
+            listEl.innerHTML = '';
+            return;
+        }
+
+        localStorage.setItem('ov-map-cloud-api', apiUrl);
+        statusEl.innerHTML = '已连接: ' + apiUrl;
+        statusEl.className = 'cloud-api-status ok';
+
+        try {
+            const resp = await fetch(apiUrl + '/api/files');
+            const files = await resp.json();
+            this._remoteFiles = files || [];
+            this._renderFileList(listEl, this._remoteFiles, true);
+        } catch (e) {
+            listEl.innerHTML = '<div class="cloud-sync-hint">获取文件列表失败</div>';
+            this._remoteFiles = [];
+        }
+    },
+
+    async _loadLocalCloudFiles() {
+        const listEl = document.getElementById('cloudLocalFileList');
+        listEl.innerHTML = '<div class="cloud-sync-hint">加载中...</div>';
         const files = await CloudReader.getAllFiles();
         if (!files.length) {
-            list.innerHTML = '<div class="cloud-sync-hint">暂无云端图层文件<br><small>可在管理后台上传 KML 文件</small></div>';
+            listEl.innerHTML = '<div class="cloud-sync-hint">暂无浏览器数据<br><small>可通过图层工具页面同步到浏览器</small></div>';
             return;
         }
         files.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
+        this._renderFileList(listEl, files, false);
+    },
 
-        list.innerHTML = '<div class="cloud-file-list">' + files.map(f => {
+    _renderFileList(container, files, isRemote) {
+        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
+        container.innerHTML = '<div class="cloud-file-list">' + files.map(f => {
             const size = f.size ? (f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB') : '';
             const date = f.createdAt ? new Date(f.createdAt).toLocaleDateString('zh-CN') : '';
             const imported = existingNames.has(f.name);
             return `<label class="cloud-file-item${imported ? ' imported' : ''}" data-id="${f.id}">
-                <input type="checkbox" value="${f.id}" ${imported ? 'disabled' : ''}>
+                <input type="checkbox" value="${f.id}" data-remote="${isRemote}" ${imported ? 'disabled' : ''}>
                 <div class="cloud-file-info">
                     <div class="cloud-file-name">${this.escH(f.name)}${imported ? ' <small style="color:#2ecc71">(已导入)</small>' : ''}</div>
                     <div class="cloud-file-meta">${[size, date].filter(Boolean).join(' · ')}</div>
@@ -1313,25 +1387,40 @@ const App = {
         }).join('') + '</div>';
     },
 
-    closeCloudSync() {
-        document.getElementById('cloudSyncModal').style.display = 'none';
-    },
-
     async syncSelectedCloudFiles() {
-        const checks = document.querySelectorAll('#cloudFileList input[type="checkbox"]:checked:not(:disabled)');
+        const activeTab = this._cloudTab;
+        const containerId = activeTab === 'cloud' ? 'cloudRemoteFileList' : 'cloudLocalFileList';
+        const checks = document.querySelectorAll('#' + containerId + ' input[type="checkbox"]:checked:not(:disabled)');
         if (!checks.length) { alert('请选择要同步的图层'); return; }
 
-        this.closeCloudSync();
         const ids = Array.from(checks).map(cb => cb.value);
-        const files = await CloudReader.getAllFiles();
-        const toImport = files.filter(f => ids.includes(f.id));
-        if (!toImport.length) return;
+        let files;
+        if (activeTab === 'cloud') {
+            files = this._remoteFiles.filter(f => ids.includes(f.id));
+            const apiUrl = (localStorage.getItem('ov-map-cloud-api') || '').replace(/\/+$/, '');
+            if (apiUrl) {
+                const fullFiles = [];
+                for (const f of files) {
+                    try {
+                        const resp = await fetch(apiUrl + '/api/files/' + f.id);
+                        if (resp.ok) fullFiles.push(await resp.json());
+                    } catch (e) { console.error('获取文件失败:', f.id, e); }
+                }
+                files = fullFiles;
+            }
+        } else {
+            const allLocal = await CloudReader.getAllFiles();
+            files = allLocal.filter(f => ids.includes(f.id));
+        }
 
-        const total = toImport.length;
+        if (!files.length) { alert('未找到选中的文件'); return; }
+
+        this.closeCloudSync();
+        const total = files.length;
         let done = 0;
-        this.showLoading(`同步云端图层 (${done}/${total})...`);
+        this.showLoading(`同步图层 (${done}/${total})...`);
 
-        for (const f of toImport) {
+        for (const f of files) {
             try {
                 const layerId = 'cloud_' + Date.now() + '_' + done;
                 const ci = this.colorIndex++;
@@ -1342,7 +1431,7 @@ const App = {
                 await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci });
             } catch (e) { console.error('同步失败:', f.name, e); }
             done++;
-            this.showLoading(`同步云端图层 (${done}/${total})...`);
+            this.showLoading(`同步图层 (${done}/${total})...`);
         }
 
         this.hideLoading();

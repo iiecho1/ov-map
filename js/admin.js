@@ -8,16 +8,6 @@ function getApiUrl() {
     return (localStorage.getItem('ov-map-cloud-api') || '').replace(/\/+$/, '');
 }
 
-function apiFetch(path, opts = {}) {
-    const url = getApiUrl();
-    if (!url) return null;
-    if (opts.body && typeof opts.body === 'object') {
-        opts.headers = { 'Content-Type': 'application/json', ...opts.headers };
-        opts.body = JSON.stringify(opts.body);
-    }
-    return fetch(url + path, opts).then(r => r.json());
-}
-
 const CloudStorage = {
     db: null,
 
@@ -31,14 +21,11 @@ const CloudStorage = {
                 }
             };
             req.onsuccess = e => { this.db = e.target.result; resolve(); };
-            req.onerror = () => reject(new Error('无法打开云端存储数据库'));
+            req.onerror = () => reject(new Error('无法打开本地存储数据库'));
         });
     },
 
     async getAll() {
-        if (getApiUrl()) {
-            try { return await apiFetch('/api/files'); } catch { return []; }
-        }
         if (!this.db) return [];
         return new Promise(resolve => {
             const req = this.db.transaction(CLOUD_STORE, 'readonly').objectStore(CLOUD_STORE).getAll();
@@ -48,9 +35,6 @@ const CloudStorage = {
     },
 
     async get(id) {
-        if (getApiUrl()) {
-            try { return await apiFetch('/api/files/' + id); } catch { return null; }
-        }
         if (!this.db) return null;
         return new Promise(resolve => {
             const req = this.db.transaction(CLOUD_STORE, 'readonly').objectStore(CLOUD_STORE).get(id);
@@ -60,9 +44,6 @@ const CloudStorage = {
     },
 
     async save(fileData) {
-        if (getApiUrl()) {
-            return apiFetch('/api/files', { method: 'POST', body: fileData });
-        }
         if (!this.db) throw new Error('存储未初始化');
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(CLOUD_STORE, 'readwrite');
@@ -73,9 +54,6 @@ const CloudStorage = {
     },
 
     async update(id, data) {
-        if (getApiUrl()) {
-            return apiFetch('/api/files/' + id, { method: 'PUT', body: data });
-        }
         const file = await this.get(id);
         if (!file) throw new Error('文件不存在');
         Object.assign(file, data, { updatedAt: Date.now() });
@@ -83,9 +61,6 @@ const CloudStorage = {
     },
 
     async remove(id) {
-        if (getApiUrl()) {
-            return apiFetch('/api/files/' + id, { method: 'DELETE' });
-        }
         if (!this.db) throw new Error('存储未初始化');
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(CLOUD_STORE, 'readwrite');
@@ -96,9 +71,6 @@ const CloudStorage = {
     },
 
     async toggle(id) {
-        if (getApiUrl()) {
-            return apiFetch('/api/files/' + id + '/toggle', { method: 'PATCH' });
-        }
         const file = await this.get(id);
         if (!file) return;
         file.enabled = !file.enabled;
@@ -107,6 +79,77 @@ const CloudStorage = {
         return file;
     }
 };
+
+const RemoteStorage = {
+    async getAll() {
+        const url = getApiUrl();
+        if (!url) return [];
+        const resp = await fetch(url + '/api/files');
+        return resp.json();
+    },
+
+    async get(id) {
+        const url = getApiUrl();
+        if (!url) return null;
+        const resp = await fetch(url + '/api/files/' + id);
+        if (!resp.ok) return null;
+        return resp.json();
+    },
+
+    async save(fileData) {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await fetch(url + '/api/files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fileData)
+        });
+        if (!resp.ok) throw new Error('上传失败');
+        return resp.json();
+    },
+
+    async update(id, data) {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await fetch(url + '/api/files/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!resp.ok) throw new Error('更新失败');
+        return resp.json();
+    },
+
+    async remove(id) {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await fetch(url + '/api/files/' + id, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('删除失败');
+        return resp.json();
+    },
+
+    async toggle(id) {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await fetch(url + '/api/files/' + id + '/toggle', { method: 'PATCH' });
+        if (!resp.ok) throw new Error('操作失败');
+        return resp.json();
+    },
+
+    async health() {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (!data || data.status !== 'ok') throw new Error('服务状态异常');
+        return data;
+    }
+};
+
+function getActiveStorage() {
+    return Admin._source === 'remote' ? RemoteStorage : CloudStorage;
+}
 
 function showToast(msg, type) {
     const t = document.getElementById('toast');
@@ -118,6 +161,8 @@ function showToast(msg, type) {
 }
 
 const Admin = {
+    _source: 'remote',
+
     async init() {
         await CloudStorage.init();
         if (sessionStorage.getItem(AUTH_KEY) === 'true') {
@@ -150,31 +195,112 @@ const Admin = {
     showAdminPage() {
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('adminPage').style.display = 'flex';
+
         const savedApi = localStorage.getItem('ov-map-cloud-api') || '';
-        document.getElementById('cloudApiUrl').value = savedApi;
-        if (savedApi) this.checkApiStatus(savedApi);
+        document.getElementById('remoteApiInput').value = savedApi;
+
+        this.switchSource('remote');
+        if (savedApi) this.connectRemoteApi();
+    },
+
+    switchSource(source) {
+        this._source = source;
+        document.querySelectorAll('.source-tab').forEach(el => {
+            el.classList.toggle('active', el.dataset.source === source);
+        });
+        document.getElementById('sourceRemote').classList.toggle('active', source === 'remote');
+        document.getElementById('sourceLocal').classList.toggle('active', source === 'local');
         this.refreshList();
     },
 
-    async checkApiStatus(url) {
-        const statusEl = document.getElementById('apiStatus');
-        try {
-            const resp = await fetch(url.replace(/\/+$/, '') + '/api/health', {
-                method: 'GET',
-                signal: AbortSignal.timeout(3000)
-            });
-            const data = await resp.json();
-            if (resp.ok && data.status === 'ok') {
-                statusEl.className = 'api-status success';
-                statusEl.textContent = `已连接 (${data.count || 0} 个文件)`;
-            } else {
-                statusEl.className = 'api-status error';
-                statusEl.textContent = '后端响应异常';
-            }
-        } catch {
-            statusEl.className = 'api-status error';
-            statusEl.textContent = '无法连接后端';
+    async connectRemoteApi() {
+        const input = document.getElementById('remoteApiInput');
+        const statusEl = document.getElementById('remoteApiStatus');
+        const apiUrl = (input.value || '').trim().replace(/\/+$/, '');
+
+        if (!apiUrl) {
+            statusEl.textContent = '';
+            statusEl.className = 'api-inline-status';
+            localStorage.removeItem('ov-map-cloud-api');
+            this._renderFileList('remoteFileList', []);
+            return;
         }
+
+        statusEl.textContent = '连接中...';
+        statusEl.className = 'api-inline-status';
+
+        try {
+            const resp = await fetch(apiUrl + '/api/health', { signal: AbortSignal.timeout(3000) });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (!data || data.status !== 'ok') throw new Error('服务状态异常');
+
+            localStorage.setItem('ov-map-cloud-api', apiUrl);
+            statusEl.textContent = '已连接 (' + (data.count || 0) + ' 个文件)';
+            statusEl.className = 'api-inline-status ok';
+            this.refreshList();
+        } catch (e) {
+            statusEl.textContent = '连接失败: ' + e.message;
+            statusEl.className = 'api-inline-status err';
+        }
+    },
+
+    async refreshList() {
+        const countEl = document.getElementById('fileCount');
+        try {
+            const files = await getActiveStorage().getAll();
+            if (this._source === 'remote') {
+                this._renderFileList('remoteFileList', files);
+            } else {
+                this._renderFileList('localFileList', files);
+            }
+            const enabledCount = files.filter(f => f.enabled !== false).length;
+            countEl.textContent = files.length ? '共 ' + files.length + ' 个，' + enabledCount + ' 个启用' : '';
+        } catch (e) {
+            const containerId = this._source === 'remote' ? 'remoteFileList' : 'localFileList';
+            document.getElementById(containerId).innerHTML = '<p class="empty-hint">获取失败: ' + e.message + '</p>';
+            countEl.textContent = '';
+        }
+    },
+
+    _renderFileList(containerId, files) {
+        const container = document.getElementById(containerId);
+        if (!files.length) {
+            const hint = this._source === 'remote'
+                ? '暂无云端文件<br><small>请先连接后端 API</small>'
+                : '暂无浏览器数据<br><small>可通过图层工具页面同步到浏览器</small>';
+            container.innerHTML = '<p class="empty-hint">' + hint + '</p>';
+            return;
+        }
+
+        files.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        container.innerHTML = files.map(f => {
+            const size = f.size ? this.formatSize(f.size) : '未知';
+            const created = f.createdAt ? new Date(f.createdAt).toLocaleString('zh-CN') : '未知';
+            const updated = f.updatedAt ? new Date(f.updatedAt).toLocaleString('zh-CN') : '';
+            const enabled = f.enabled !== false;
+
+            return `<div class="file-item ${enabled ? '' : 'file-disabled'}" data-id="${f.id}">
+                <div class="file-icon">${enabled ? '&#128196;' : '&#128196;'}</div>
+                <div class="file-info">
+                    <div class="file-name-row">
+                        <span class="file-name" id="fname-${f.id}">${this.escH(f.name)}</span>
+                        <span class="file-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? '启用' : '禁用'}</span>
+                    </div>
+                    <div class="file-meta">
+                        <span>${size}</span>
+                        <span>上传: ${created}</span>
+                        ${updated && updated !== created ? `<span>更新: ${updated}</span>` : ''}
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="btn btn-xs" onclick="Admin.startRename('${f.id}')" title="重命名">&#9998; 重命名</button>
+                    <button class="btn btn-xs ${enabled ? 'btn-warn' : 'btn-primary'}" onclick="Admin.toggleFile('${f.id}')">${enabled ? '禁用' : '启用'}</button>
+                    <button class="btn btn-xs" onclick="Admin.showFileDetail('${f.id}')" title="查看详情">&#128269; 详情</button>
+                    <button class="btn btn-xs btn-danger" onclick="Admin.deleteFile('${f.id}', '${this.escA(f.name)}')">&#10005; 删除</button>
+                </div>
+            </div>`;
+        }).join('');
     },
 
     changePassword() {
@@ -185,59 +311,6 @@ const Admin = {
         localStorage.setItem('ov-map-admin-pw', pw);
         input.value = '';
         showToast('密码已修改', 'success');
-    },
-
-    async saveCloudApi() {
-        const url = document.getElementById('cloudApiUrl').value.trim();
-        const statusEl = document.getElementById('apiStatus');
-        const btn = document.getElementById('btnSaveApi');
-
-        if (!url) {
-            localStorage.removeItem('ov-map-cloud-api');
-            statusEl.className = 'api-status';
-            statusEl.textContent = '';
-            showToast('已清除云端 API，使用本地存储', 'success');
-            this.refreshList();
-            return;
-        }
-
-        btn.disabled = true;
-        btn.textContent = '检测中...';
-        statusEl.className = 'api-status checking';
-        statusEl.textContent = '正在检测后端连接...';
-
-        try {
-            const resp = await fetch(url.replace(/\/+$/, '') + '/api/health', {
-                method: 'GET',
-                signal: AbortSignal.timeout(5000)
-            });
-            const data = await resp.json();
-
-            if (resp.ok && data.status === 'ok') {
-                localStorage.setItem('ov-map-cloud-api', url);
-                statusEl.className = 'api-status success';
-                statusEl.textContent = `连接成功 (${data.count || 0} 个文件)`;
-                showToast('云端 API 已保存', 'success');
-                this.refreshList();
-            } else {
-                statusEl.className = 'api-status error';
-                statusEl.textContent = '后端响应异常';
-                showToast('后端响应异常，未保存', 'error');
-            }
-        } catch (err) {
-            statusEl.className = 'api-status error';
-            if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-                statusEl.textContent = '连接超时（5秒），请检查地址';
-            } else if (err.name === 'TypeError') {
-                statusEl.textContent = '无法连接，请检查地址是否正确';
-            } else {
-                statusEl.textContent = '连接失败: ' + err.message;
-            }
-            showToast('无法连接后端，未保存', 'error');
-        }
-
-        btn.disabled = false;
-        btn.textContent = '保存';
     },
 
     initUploadArea() {
@@ -273,6 +346,7 @@ const Admin = {
     },
 
     async uploadFiles(files) {
+        const storage = getActiveStorage();
         const progress = document.getElementById('uploadProgress');
         const progressFill = document.getElementById('progressFill');
         const progressText = document.getElementById('progressText');
@@ -288,7 +362,7 @@ const Admin = {
             try {
                 const text = await file.text();
                 const id = 'cloud_' + Date.now() + '_' + i;
-                await CloudStorage.save({
+                await storage.save({
                     id,
                     name: file.name,
                     text,
@@ -315,50 +389,6 @@ const Admin = {
         }
     },
 
-    async refreshList() {
-        const container = document.getElementById('kmlFileList');
-        const countEl = document.getElementById('fileCount');
-        const files = await CloudStorage.getAll();
-
-        if (!files.length) {
-            container.innerHTML = '<p class="empty-hint">暂无云端 KML 文件</p>';
-            countEl.textContent = '';
-            return;
-        }
-
-        files.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        const enabledCount = files.filter(f => f.enabled !== false).length;
-        countEl.textContent = `共 ${files.length} 个，${enabledCount} 个启用`;
-
-        container.innerHTML = files.map(f => {
-            const size = f.size ? this.formatSize(f.size) : '未知';
-            const created = f.createdAt ? new Date(f.createdAt).toLocaleString('zh-CN') : '未知';
-            const updated = f.updatedAt ? new Date(f.updatedAt).toLocaleString('zh-CN') : '';
-            const enabled = f.enabled !== false;
-
-            return `<div class="file-item ${enabled ? '' : 'file-disabled'}" data-id="${f.id}">
-                <div class="file-icon">${enabled ? '&#128196;' : '&#128196;'}</div>
-                <div class="file-info">
-                    <div class="file-name-row">
-                        <span class="file-name" id="fname-${f.id}">${this.escH(f.name)}</span>
-                        <span class="file-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? '启用' : '禁用'}</span>
-                    </div>
-                    <div class="file-meta">
-                        <span>${size}</span>
-                        <span>上传: ${created}</span>
-                        ${updated && updated !== created ? `<span>更新: ${updated}</span>` : ''}
-                    </div>
-                </div>
-                <div class="file-actions">
-                    <button class="btn btn-xs" onclick="Admin.startRename('${f.id}')" title="重命名">&#9998; 重命名</button>
-                    <button class="btn btn-xs ${enabled ? 'btn-warn' : 'btn-primary'}" onclick="Admin.toggleFile('${f.id}')">${enabled ? '禁用' : '启用'}</button>
-                    <button class="btn btn-xs" onclick="Admin.showFileDetail('${f.id}')" title="查看详情">&#128269; 详情</button>
-                    <button class="btn btn-xs btn-danger" onclick="Admin.deleteFile('${f.id}', '${this.escA(f.name)}')">&#10005; 删除</button>
-                </div>
-            </div>`;
-        }).join('');
-    },
-
     startRename(id) {
         const nameEl = document.getElementById('fname-' + id);
         if (!nameEl) return;
@@ -376,7 +406,7 @@ const Admin = {
             const newName = input.value.trim();
             if (save && newName && newName !== oldName) {
                 try {
-                    await CloudStorage.update(id, { name: newName });
+                    await getActiveStorage().update(id, { name: newName });
                     showToast('已重命名', 'success');
                 } catch (err) {
                     showToast('重命名失败', 'error');
@@ -393,7 +423,7 @@ const Admin = {
     },
 
     async showFileDetail(id) {
-        const file = await CloudStorage.get(id);
+        const file = await getActiveStorage().get(id);
         if (!file) { showToast('文件不存在', 'error'); return; }
 
         const size = file.size ? this.formatSize(file.size) : '未知';
@@ -415,6 +445,8 @@ const Admin = {
                 <div class="detail-value">${this.escH(file.ext || 'kml')}</div>
                 <div class="detail-label">状态</div>
                 <div class="detail-value"><span class="file-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? '已启用' : '已禁用'}</span></div>
+                <div class="detail-label">来源</div>
+                <div class="detail-value">${this._source === 'remote' ? '云端' : '浏览器'}</div>
                 <div class="detail-label">创建时间</div>
                 <div class="detail-value">${created}</div>
                 <div class="detail-label">更新时间</div>
@@ -430,7 +462,7 @@ const Admin = {
     },
 
     async downloadFile(id) {
-        const file = await CloudStorage.get(id);
+        const file = await getActiveStorage().get(id);
         if (!file || !file.text) { showToast('文件内容为空', 'error'); return; }
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([file.text], { type: 'application/vnd.google-earth.kml+xml' }));
@@ -445,7 +477,7 @@ const Admin = {
 
     async toggleFile(id) {
         try {
-            await CloudStorage.toggle(id);
+            await getActiveStorage().toggle(id);
             showToast('状态已更新', 'success');
             this.refreshList();
         } catch (err) {
@@ -456,7 +488,7 @@ const Admin = {
     async deleteFile(id, name) {
         if (!confirm(`确定删除 "${name}" ？`)) return;
         try {
-            await CloudStorage.remove(id);
+            await getActiveStorage().remove(id);
             showToast('已删除', 'success');
             this.refreshList();
         } catch (err) {

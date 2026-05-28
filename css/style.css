@@ -438,6 +438,101 @@ body {
     padding: 30px 10px;
 }
 
+.cloud-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #4a6278;
+    margin: -14px -18px 14px;
+}
+
+.cloud-tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #95a5a6;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cloud-tab:hover {
+    color: #ecf0f1;
+    background: rgba(255,255,255,0.03);
+}
+
+.cloud-tab.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+}
+
+.cloud-api-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.cloud-api-bar input {
+    flex: 1;
+    background: #1a252f;
+    border: 1px solid #4a6278;
+    color: #ecf0f1;
+    padding: 7px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+}
+
+.cloud-api-bar input:focus {
+    border-color: #3498db;
+}
+
+.cloud-api-bar button {
+    padding: 7px 14px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    background: #3498db;
+    color: #fff;
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+
+.cloud-api-bar button:hover {
+    background: #2980b9;
+}
+
+.cloud-tab-content {
+    display: none;
+}
+
+.cloud-tab-content.active {
+    display: block;
+}
+
+.cloud-api-status {
+    font-size: 11px;
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.cloud-api-status.ok {
+    color: #2ecc71;
+    background: rgba(46,204,113,0.1);
+}
+
+.cloud-api-status.err {
+    color: #e74c3c;
+    background: rgba(231,76,60,0.1);
+}
+
 .layer-list {
     display: flex;
     flex-direction: column;
