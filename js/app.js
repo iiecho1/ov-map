@@ -188,6 +188,7 @@ const App = {
             this.initBaseLayers();
             this.initDrawControl();
             this.initLocateControl();
+            this.initSidebarToggleControl();
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
@@ -348,6 +349,22 @@ const App = {
         new Ctrl().addTo(this.map);
     },
 
+    initSidebarToggleControl() {
+        const Ctrl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd() {
+                const btn = L.DomUtil.create('div', 'sidebar-btn');
+                btn.innerHTML = '&#9776;';
+                btn.title = '切换菜单';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.disableScrollPropagation(btn);
+                L.DomEvent.on(btn, 'click', () => App.toggleSidebar());
+                return btn;
+            }
+        });
+        new Ctrl().addTo(this.map);
+    },
+
     locate() {
         const btn = document.querySelector('.locate-btn');
         if (btn) btn.classList.add('locating');
@@ -466,6 +483,7 @@ const App = {
             .openPopup();
         container.innerHTML = `<div class="search-result-item"><div class="result-name">经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}</div><div class="result-sub">已跳转到该位置</div></div>`;
         container.classList.add('has-items');
+        this.closeSidebarOnMobile();
     },
 
     _gaodeKey: '', _searchAbort: null,
@@ -528,6 +546,7 @@ const App = {
         if (this.searchMarker) this.map.removeLayer(this.searchMarker);
         this.searchMarker = L.marker([lat, lon]).addTo(this.map).bindPopup(name).openPopup();
         this._dom.searchResults.classList.remove('has-items');
+        this.closeSidebarOnMobile();
     },
 
     searchLayer(query) {
@@ -556,6 +575,7 @@ const App = {
         if (m.latlng) this.map.setView(m.latlng, 17);
         if (m.layer.openPopup) m.layer.openPopup();
         this._dom.searchResults.classList.remove('has-items');
+        this.closeSidebarOnMobile();
     },
 
     getCenter(sub, f) {
@@ -590,6 +610,36 @@ const App = {
 
     hideContextMenu() {
         this._dom.contextMenu.classList.remove('show');
+        if (this._ctxMarker) {
+            this.map.removeLayer(this._ctxMarker);
+            this._ctxMarker = null;
+        }
+    },
+
+    _showContextMenu(latlng, cx, cy) {
+        this._ctxLatLng = latlng;
+
+        if (this._ctxMarker) this.map.removeLayer(this._ctxMarker);
+        this._ctxMarker = L.marker([latlng.lat, latlng.lng], {
+            icon: L.divIcon({
+                className: 'ctx-indicator',
+                html: '<div style="width:16px;height:16px;border:3px solid #e74c3c;border-radius:50%;background:rgba(231,76,60,0.3);animation:ctx-pulse 1.2s ease-out infinite"></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            })
+        }).addTo(this.map);
+
+        const menu = this._dom.contextMenu;
+        this._dom.ctxCoord.innerHTML =
+            `经度: ${latlng.lng.toFixed(6)}<br>纬度: ${latlng.lat.toFixed(6)}`;
+        menu.style.left = cx + 'px';
+        menu.style.top = cy + 'px';
+        menu.classList.add('show');
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = Math.max(0, cx - rect.width) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = Math.max(0, cy - rect.height) + 'px';
+        if (rect.left < 0) menu.style.left = '0px';
+        if (rect.top < 0) menu.style.top = '0px';
     },
 
     copyCoord() {
@@ -650,22 +700,67 @@ const App = {
             if (!e.target.closest('.search-box')) this._dom.searchResults.classList.remove('has-items');
             this.hideContextMenu();
         });
+
+        document.getElementById('sidebar').addEventListener('click', e => {
+            if (e.target.closest('.layer-item') || e.target.closest('.search-result-item') || e.target.closest('.btn')) {
+                this.closeSidebarOnMobile();
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (!this._isMobile()) {
+                document.getElementById('sidebar').classList.remove('open');
+                document.getElementById('sidebarOverlay').classList.remove('show');
+                const btn = document.querySelector('.sidebar-btn');
+                if (btn) btn.classList.remove('active');
+            }
+            this.map.invalidateSize();
+        });
         document.addEventListener('contextmenu', e => { if (e.target.closest('#map')) e.preventDefault(); });
 
+        // 移动端长按：仅长按显示经纬度卡片，单击不显示
+        this._longPressTimer = null;
+        this._longPressFired = false;
+        this._ctxTouchPos = null;
+        this._pendingContextLatLng = null;
+
         this.map.on('contextmenu', e => {
-            this._ctxLatLng = e.latlng;
-            const menu = this._dom.contextMenu;
-            this._dom.ctxCoord.innerHTML =
-                `经度: ${e.latlng.lng.toFixed(6)}<br>纬度: ${e.latlng.lat.toFixed(6)}`;
-            const cx = e.originalEvent.clientX, cy = e.originalEvent.clientY;
-            menu.style.left = cx + 'px';
-            menu.style.top = cy + 'px';
-            menu.classList.add('show');
-            const rect = menu.getBoundingClientRect();
-            if (rect.right > window.innerWidth) menu.style.left = Math.max(0, cx - rect.width) + 'px';
-            if (rect.bottom > window.innerHeight) menu.style.top = Math.max(0, cy - rect.height) + 'px';
-            if (rect.left < 0) { menu.style.left = '0px'; }
-            if (rect.top < 0) { menu.style.top = '0px'; }
+            // 如果 touchstart 已启动长按定时器，说明是移动端，仅暂存坐标，由定时器决定是否显示
+            if (this._longPressTimer) {
+                this._pendingContextLatLng = e.latlng;
+                return;
+            }
+            // 桌面端右键：立即显示
+            this._showContextMenu(e.latlng, e.originalEvent.clientX, e.originalEvent.clientY);
+        });
+
+        this.map.on('touchstart', e => {
+            if (e.originalEvent.touches.length !== 1) return;
+            const touch = e.originalEvent.touches[0];
+            this._ctxTouchPos = { x: touch.clientX, y: touch.clientY };
+            this._longPressFired = false;
+            this._pendingContextLatLng = null;
+            clearTimeout(this._longPressTimer);
+            this._longPressTimer = setTimeout(() => {
+                this._longPressFired = true;
+                this._longPressTimer = null;
+                const latlng = this._pendingContextLatLng;
+                if (latlng && this._ctxTouchPos) {
+                    this._showContextMenu(latlng, this._ctxTouchPos.x, this._ctxTouchPos.y);
+                }
+            }, 600);
+        }, { passive: true });
+        this.map.on('touchmove', () => {
+            clearTimeout(this._longPressTimer);
+            this._longPressTimer = null;
+        }, { passive: true });
+        this.map.on('touchend', () => {
+            clearTimeout(this._longPressTimer);
+            this._longPressTimer = null;
+            // 短按：确保经纬度卡片关闭
+            if (!this._longPressFired) {
+                this.hideContextMenu();
+            }
         });
 
         this._cursorLatest = null;
@@ -680,7 +775,7 @@ const App = {
         });
         this.map.on('zoomend', () => { this._dom.zoomLevel.textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
         this.map.on('moveend', () => this.debouncedSave());
-        this.map.on(L.Draw.Event.CREATED, e => { this.drawnItems.addLayer(e.layer); this.showMeasure(e.layerType, e.layer); });
+        this.map.on(L.Draw.Event.CREATED, e => { this.drawnItems.addLayer(e.layer); this.showMeasure(e.layerType, e.layer); e.layer.openPopup(); });
         this.map.on(L.Draw.Event.EDITED, e => { e.layers.eachLayer(l => this.showMeasure(l.feature?.geometry?.type || 'polygon', l)); });
         this.map.on(L.Draw.Event.DRAWSTOP, () => {
             this.map.dragging.enable();
@@ -947,7 +1042,7 @@ const App = {
 
                 if (layer) {
                     const html = self.getPopup(f);
-                    if (html) layer.bindPopup(html, { maxWidth: 450, maxHeight: 350 });
+                    if (html) layer.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
                     group.addLayer(layer);
                 }
             }
@@ -1134,11 +1229,35 @@ const App = {
 
     showMeasure(type, layer) {
         const c = this._dom.measureResults;
-        let html = '';
-        if (type === 'polyline') { const ll = layer.getLatLngs(); let d = 0; for (let i = 1; i < ll.length; i++) d += ll[i-1].distanceTo(ll[i]); html = `<div class="measure-result"><div class="label">线段</div><div class="value">长度: ${this.fmtD(d)}</div></div>`; }
-        else if (type === 'polygon' || type === 'rectangle') { const ll = layer.getLatLngs()[0]; html = `<div class="measure-result"><div class="label">${type === 'rectangle' ? '矩形' : '多边形'}</div><div class="value">面积: ${this.fmtA(this.calcA(ll))}</div><div class="value">周长: ${this.fmtD(this.calcP(ll))}</div></div>`; }
-        else if (type === 'circle') { const r = layer.getRadius(); html = `<div class="measure-result"><div class="label">圆形</div><div class="value">半径: ${this.fmtD(r)}</div><div class="value">面积: ${this.fmtA(Math.PI*r*r)}</div></div>`; }
-        c.innerHTML = html + c.innerHTML;
+        let label = '', body = '', popupHtml = '';
+        if (type === 'polyline') {
+            const ll = layer.getLatLngs();
+            let d = 0;
+            for (let i = 1; i < ll.length; i++) d += ll[i-1].distanceTo(ll[i]);
+            label = '线段';
+            body = `<div class="value">长度: ${this.fmtD(d)}</div>`;
+            popupHtml = `<div class="popup-title">📏 ${label}</div><div class="popup-body">长度: <strong>${this.fmtD(d)}</strong></div>`;
+        } else if (type === 'polygon' || type === 'rectangle') {
+            const ll = layer.getLatLngs()[0];
+            label = type === 'rectangle' ? '矩形' : '多边形';
+            const area = this.fmtA(this.calcA(ll));
+            const perimeter = this.fmtD(this.calcP(ll));
+            body = `<div class="value">面积: ${area}</div><div class="value">周长: ${perimeter}</div>`;
+            popupHtml = `<div class="popup-title">📐 ${label}</div><div class="popup-body">面积: <strong>${area}</strong><br>周长: <strong>${perimeter}</strong></div>`;
+        } else if (type === 'circle') {
+            const r = layer.getRadius();
+            label = '圆形';
+            const area = this.fmtA(Math.PI * r * r);
+            body = `<div class="value">半径: ${this.fmtD(r)}</div><div class="value">面积: ${area}</div>`;
+            popupHtml = `<div class="popup-title">⭕ ${label}</div><div class="popup-body">半径: <strong>${this.fmtD(r)}</strong><br>面积: <strong>${area}</strong></div>`;
+        } else if (type === 'marker') {
+            const ll = layer.getLatLng();
+            label = '标记';
+            body = '';
+            popupHtml = `<div class="popup-title">📍 ${label}</div><div class="popup-body">经度: <strong>${ll.lng.toFixed(6)}</strong><br>纬度: <strong>${ll.lat.toFixed(6)}</strong></div>`;
+        }
+        if (body) c.innerHTML = `<div class="measure-result"><div class="label">${label}</div>${body}</div>` + c.innerHTML;
+        if (popupHtml) layer.bindPopup(popupHtml, { className: 'measure-popup' });
     },
 
     calcA(ll) { let a = 0; for (let i = 0, n = ll.length; i < n; i++) { const j = (i+1)%n; a += ll[i].lat*ll[j].lng - ll[j].lat*ll[i].lng; } return Math.abs(a)/2*111319.9*111319.9; },
@@ -1147,7 +1266,26 @@ const App = {
     fmtA(s) { if (s >= 1e6) return (s/1e6).toFixed(2)+' 平方公里'; if (s >= 1e4) return (s/1e4).toFixed(2)+' 公顷'; return s.toFixed(2)+' 平方米'; },
 
     clearMeasurements() { this.drawnItems.clearLayers(); this._dom.measureResults.innerHTML = '<p class="empty-hint">使用绘图工具进行测量</p>'; },
-    async clearAllData() { if (!confirm('确定清除所有数据？')) return; await Storage.clearAll(); alert('已清除，请刷新页面'); }
+    async clearAllData() { if (!confirm('确定清除所有数据？')) return; await Storage.clearAll(); alert('已清除，请刷新页面'); },
+
+    toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        const btn = document.querySelector('.sidebar-btn');
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('show');
+        if (btn) btn.classList.toggle('active');
+        setTimeout(() => this.map.invalidateSize(), 300);
+    },
+
+    closeSidebarOnMobile() {
+        if (this._isMobile()) {
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('sidebarOverlay').classList.remove('show');
+            const btn = document.querySelector('.sidebar-btn');
+            if (btn) btn.classList.remove('active');
+        }
+    }
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());

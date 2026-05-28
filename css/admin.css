@@ -474,15 +474,39 @@ body {
         flex-direction: column;
         gap: 10px;
         text-align: center;
+        padding: 12px 16px;
+    }
+    .admin-header-left {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .admin-subtitle {
+        margin-left: 0;
+        margin-top: 4px;
+    }
+    .admin-header-right {
+        width: 100%;
+        justify-content: center;
+    }
+    .btn-header {
+        padding: 10px 14px;
+        font-size: 14px;
     }
     .admin-content {
         padding: 12px;
     }
     .admin-section {
         padding: 16px;
+        margin-bottom: 14px;
+    }
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
     }
     .upload-area {
-        padding: 24px;
+        padding: 24px 16px;
     }
     .file-item {
         flex-wrap: wrap;
@@ -490,5 +514,49 @@ body {
     .file-actions {
         width: 100%;
         justify-content: flex-end;
+    }
+    .setting-row {
+        flex-direction: column;
+    }
+    .setting-row input {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .login-card {
+        padding: 28px 20px;
+        border-radius: 10px;
+    }
+    .login-icon {
+        font-size: 36px;
+    }
+    .login-header h2 {
+        font-size: 18px;
+    }
+    .form-group input {
+        padding: 14px;
+        font-size: 16px;
+    }
+    .btn-login {
+        padding: 14px;
+        font-size: 16px;
+    }
+    .admin-content {
+        padding: 8px;
+    }
+    .admin-section {
+        padding: 12px;
+    }
+    .section-header h3 {
+        font-size: 14px;
+    }
+    .file-meta {
+        flex-direction: column;
+        gap: 4px;
+    }
+    .file-actions .btn {
+        padding: 8px 12px;
+        font-size: 13px;
     }
 }
