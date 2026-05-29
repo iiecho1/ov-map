@@ -1127,6 +1127,9 @@ $('btnSyncCloud').addEventListener('click', async () => {
   const apiUrl = input.trim().replace(/\/+$/, '');
   if (!apiUrl) {
     if (!cloudDb) { alert('本地存储未就绪，请稍后重试'); return; }
+    const overlay = $('loadingOverlay');
+    overlay.querySelector('.loading-text').textContent = '正在保存到浏览器...';
+    overlay.classList.add('show');
     try {
       const id = 'cloud_' + Date.now();
       const tx = cloudDb.transaction(CLOUD_STORE, 'readwrite');
@@ -1141,15 +1144,21 @@ $('btnSyncCloud').addEventListener('click', async () => {
         updatedAt: Date.now()
       });
       tx.oncomplete = () => {
+        overlay.classList.remove('show');
         $('statusLeft').textContent = '已保存到浏览器: ' + lastKmlData.name;
         alert('已保存到浏览器数据，可在主页面「云端同步」中导入');
       };
-      tx.onerror = () => alert('保存失败');
+      tx.onerror = () => { overlay.classList.remove('show'); alert('保存失败'); };
     } catch (err) {
+      overlay.classList.remove('show');
       alert('保存失败: ' + err.message);
     }
     return;
   }
+
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在连接后端...';
+  overlay.classList.add('show');
 
   localStorage.setItem('ov-map-cloud-api', apiUrl);
   try {
@@ -1158,16 +1167,19 @@ $('btnSyncCloud').addEventListener('click', async () => {
     const data = await resp.json();
     if (!data || data.status !== 'ok') throw new Error('服务状态异常');
   } catch (e) {
+    overlay.classList.remove('show');
     alert('无法连接后端: ' + e.message);
     return;
   }
 
+  overlay.querySelector('.loading-text').textContent = '正在上传...';
   try {
     const uploadResp = await compressedPost(apiUrl + '/api/files', {
       name: lastKmlData.name,
       text: lastKmlData.text,
       ext: 'kml'
     });
+    overlay.classList.remove('show');
     if (uploadResp.ok) {
       $('statusLeft').textContent = '已同步到后端: ' + lastKmlData.name;
       alert('已同步到后端服务器，可在主页面「云端同步」中导入');
@@ -1182,6 +1194,7 @@ $('btnSyncCloud').addEventListener('click', async () => {
       alert('同步失败: ' + msg);
     }
   } catch (e) {
+    overlay.classList.remove('show');
     alert('同步失败: ' + e.message);
   }
 });
