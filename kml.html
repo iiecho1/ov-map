@@ -1107,13 +1107,18 @@ async function compressGzip(str) {
   return result;
 }
 
-async function compressedPost(url, bodyObj) {
+async function compressedPost(url, bodyObj, onProgress) {
   const json = JSON.stringify(bodyObj);
   const compressed = await compressGzip(json);
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
-    body: compressed
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('Content-Encoding', 'gzip');
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+    xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: () => JSON.parse(xhr.responseText) });
+    xhr.onerror = () => reject(new Error('网络错误'));
+    xhr.send(compressed);
   });
 }
 
@@ -1178,6 +1183,9 @@ $('btnSyncCloud').addEventListener('click', async () => {
       name: lastKmlData.name,
       text: lastKmlData.text,
       ext: 'kml'
+    }, (loaded, total) => {
+      const pct = Math.round((loaded / total) * 100);
+      overlay.querySelector('.loading-text').textContent = `正在上传... ${pct}%`;
     });
     overlay.classList.remove('show');
     if (uploadResp.ok) {

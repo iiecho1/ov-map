@@ -3,6 +3,8 @@ const CLOUD_DB_VERSION = 1;
 const CLOUD_STORE = 'kml-files';
 const AUTH_KEY = 'ov-map-admin-auth';
 const DEFAULT_PASSWORD_HASH = 'admin123';
+const CHUNK_SIZE = 512 * 1024;
+const MAX_CONCURRENT = 3;
 
 function getApiUrl() {
     return (localStorage.getItem('ov-map-cloud-api') || '').replace(/\/+$/, '');
@@ -32,14 +34,22 @@ async function compressGzip(str) {
     return result;
 }
 
-async function compressedPost(url, bodyObj) {
+function xhrUpload(url, body, headers, onProgress) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+        xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+        xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: () => JSON.parse(xhr.responseText) });
+        xhr.onerror = () => reject(new Error('网络错误'));
+        xhr.send(body);
+    });
+}
+
+async function compressedPost(url, bodyObj, onProgress) {
     const json = JSON.stringify(bodyObj);
     const compressed = await compressGzip(json);
-    return fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
-        body: compressed
-    });
+    return xhrUpload(url, compressed, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' }, onProgress);
 }
 
 async function compressedPut(url, bodyObj) {
@@ -50,6 +60,52 @@ async function compressedPut(url, bodyObj) {
         headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
         body: compressed
     });
+}
+
+async function chunkedUpload(fileData, onProgress) {
+    const apiUrl = getApiUrl();
+    if (!apiUrl) throw new Error('未配置 API 地址');
+
+    const json = JSON.stringify(fileData);
+    const compressed = await compressGzip(json);
+    const totalSize = compressed.length;
+    const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+
+    const initResp = await fetch(apiUrl + '/api/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: fileData.name, totalChunks, fileSize: totalSize })
+    });
+    if (!initResp.ok) throw new Error('初始化分片上传失败');
+    const { uploadId } = await initResp.json();
+
+    let uploaded = 0;
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunk = compressed.slice(start, end);
+
+        const resp = await xhrUpload(apiUrl + '/api/upload/chunk', chunk, {
+            'Content-Type': 'application/octet-stream',
+            'X-Upload-Id': uploadId,
+            'X-Chunk-Index': String(i)
+        }, (loaded) => {
+            if (onProgress) onProgress(uploaded + loaded, totalSize);
+        });
+        if (!resp.ok) throw new Error('分片上传失败');
+        uploaded += chunk.length;
+    }
+
+    const completeResp = await fetch(apiUrl + '/api/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadId, name: fileData.name, ext: fileData.ext || 'kml' })
+    });
+    if (!completeResp.ok) {
+        const err = await completeResp.json().catch(() => ({}));
+        throw new Error(err.error || '合并分片失败');
+    }
+    return completeResp.json();
 }
 
 const CloudStorage = {
@@ -140,10 +196,15 @@ const RemoteStorage = {
         return resp.json();
     },
 
-    async save(fileData) {
+    async save(fileData, onProgress) {
         const url = getApiUrl();
         if (!url) throw new Error('未配置 API 地址');
-        const resp = await compressedPost(url + '/api/files', fileData);
+        let resp;
+        if (fileData.text && fileData.text.length > CHUNK_SIZE) {
+            const result = await chunkedUpload(fileData, onProgress);
+            return result;
+        }
+        resp = await compressedPost(url + '/api/files', fileData, onProgress);
         if (!resp.ok) {
             if (resp.status === 413) throw new Error('文件过大，Cloudflare CDN 限制上传大小');
             throw new Error('上传失败 (HTTP ' + resp.status + ')');
@@ -156,18 +217,6 @@ const RemoteStorage = {
         if (!url) throw new Error('未配置 API 地址');
         const resp = await compressedPut(url + '/api/files/' + id, data);
         if (!resp.ok) throw new Error('更新失败 (HTTP ' + resp.status + ')');
-        return resp.json();
-    },
-
-    async update(id, data) {
-        const url = getApiUrl();
-        if (!url) throw new Error('未配置 API 地址');
-        const resp = await fetch(url + '/api/files/' + id, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        if (!resp.ok) throw new Error('更新失败');
         return resp.json();
     },
 
@@ -404,15 +453,27 @@ const Admin = {
         progress.style.display = 'flex';
 
         let success = 0;
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const pct = Math.round(((i) / files.length) * 100);
-            progressFill.style.width = pct + '%';
-            progressText.textContent = `上传 ${i + 1}/${files.length}: ${file.name}`;
+        let completed = 0;
+        const totalFiles = files.length;
+        const fileBytes = Array.from(files).map(f => f.size);
+        const fileProgress = new Array(totalFiles).fill(0);
+        const totalBytes = fileBytes.reduce((s, b) => s + b, 0);
 
+        const updateOverallProgress = () => {
+            const uploadedBytes = fileProgress.reduce((s, p) => s + p, 0);
+            const pct = totalBytes > 0 ? Math.round((uploadedBytes / totalBytes) * 100) : Math.round((completed / totalFiles) * 100);
+            progressFill.style.width = pct + '%';
+            progressText.textContent = `${completed}/${totalFiles} 完成 (${pct}%)`;
+        };
+
+        const uploadOne = async (file, index) => {
             try {
                 const text = await file.text();
-                const id = 'cloud_' + Date.now() + '_' + i;
+                const id = 'cloud_' + Date.now() + '_' + index;
+                const onProgress = (loaded, total) => {
+                    fileProgress[index] = loaded;
+                    updateOverallProgress();
+                };
                 await storage.save({
                     id,
                     name: file.name,
@@ -422,13 +483,29 @@ const Admin = {
                     enabled: true,
                     createdAt: Date.now(),
                     updatedAt: Date.now()
-                });
+                }, storage === RemoteStorage ? onProgress : undefined);
                 success++;
             } catch (err) {
                 console.error('上传失败:', file.name, err);
                 showToast(`上传失败: ${file.name}`, 'error');
+            } finally {
+                completed++;
+                fileProgress[index] = fileBytes[index];
+                updateOverallProgress();
             }
+        };
+
+        const queue = Array.from(files).map((f, i) => () => uploadOne(f, i));
+        const workers = [];
+        for (let w = 0; w < Math.min(MAX_CONCURRENT, queue.length); w++) {
+            workers.push((async () => {
+                while (queue.length) {
+                    const task = queue.shift();
+                    if (task) await task();
+                }
+            })());
         }
+        await Promise.all(workers);
 
         progressFill.style.width = '100%';
         progressText.textContent = '完成';
