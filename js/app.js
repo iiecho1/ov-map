@@ -1392,6 +1392,9 @@ const App = {
         const checks = document.querySelectorAll('#' + containerId + ' input[type="checkbox"]:checked:not(:disabled)');
         if (!checks.length) { alert('请选择要同步的图层'); return; }
 
+        this.showLoading('正在获取图层...');
+        this.closeCloudSync();
+
         const ids = Array.from(checks).map(cb => cb.value);
         let files;
         if (activeTab === 'cloud') {
@@ -1412,12 +1415,13 @@ const App = {
             files = allLocal.filter(f => ids.includes(f.id));
         }
 
-        if (!files.length) { alert('未找到选中的文件'); return; }
+        if (!files.length) { this.hideLoading(); alert('未找到选中的文件'); return; }
 
-        this.closeCloudSync();
         const total = files.length;
         let done = 0;
-        this.showLoading(`同步图层 (${done}/${total})...`);
+        this.showLoading(`正在同步 (0/${total})...`);
+
+        await new Promise(r => setTimeout(r, 50));
 
         for (const f of files) {
             try {
@@ -1430,7 +1434,7 @@ const App = {
                 await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci });
             } catch (e) { console.error('同步失败:', f.name, e); }
             done++;
-            this.showLoading(`同步图层 (${done}/${total})...`);
+            this.showLoading(`正在同步 (${done}/${total})...`);
         }
 
         this.hideLoading();
