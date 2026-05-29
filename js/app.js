@@ -68,16 +68,27 @@ const Storage = {
     },
     removeLayer(id) {
         if (!this.db) return;
-        const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
-        tx.onerror = () => console.error('Storage: removeLayer failed', id);
-        tx.objectStore(STORE_LAYERS).delete(id);
+        const del = (key) => {
+            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+            tx.onerror = () => console.error('Storage: removeLayer failed', key);
+            tx.objectStore(STORE_LAYERS).delete(key);
+        };
+        del(id);
+        const nid = Number(id);
+        if (!isNaN(nid)) del(nid);
     },
     getLayer(id) {
         if (!this.db) return Promise.resolve(null);
-        return new Promise(resolve => {
-            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).get(id);
+        const doGet = (key) => new Promise(resolve => {
+            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => resolve(null);
+        });
+        return doGet(id).then(result => {
+            if (result) return result;
+            const nid = Number(id);
+            if (!isNaN(nid)) return doGet(nid);
+            return null;
         });
     },
     getAllLayers() {
@@ -807,7 +818,7 @@ const App = {
         if (!s) return;
         if (s.baseLayer && this.baseLayers[s.baseLayer]) { this.switchBaseLayer(s.baseLayer); const r = document.querySelector(`input[name="baseLayer"][value="${s.baseLayer}"]`); if (r) r.checked = true; }
         if (s.center && s.zoom) this.map.setView(s.center, s.zoom);
-        if (s.layerOrder) this._layerOrder = s.layerOrder;
+        if (s.layerOrder) this._layerOrder = s.layerOrder.map(x => String(x));
     },
 
     async _runConcurrent(tasks, limit = 8) {
@@ -1177,8 +1188,10 @@ const App = {
             el.style.borderTop = '';
             if (!dragId || dragId === el.dataset.id) return;
             const order = this._layerOrder;
-            const fromIdx = order.indexOf(dragId);
-            const toIdx = order.indexOf(el.dataset.id);
+            const dragStr = String(dragId);
+            const dropStr = String(el.dataset.id);
+            const fromIdx = order.findIndex(x => String(x) === dragStr);
+            const toIdx = order.findIndex(x => String(x) === dropStr);
             if (fromIdx < 0 || toIdx < 0) return;
             order.splice(fromIdx, 1);
             order.splice(toIdx, 0, dragId);
@@ -1189,7 +1202,8 @@ const App = {
 
     moveLayer(id, dir) {
         const order = this._layerOrder;
-        const idx = order.indexOf(String(id));
+        const idStr = String(id);
+        const idx = order.findIndex(x => String(x) === idStr);
         if (idx < 0) return;
         const newIdx = idx + dir;
         if (newIdx < 0 || newIdx >= order.length) return;
@@ -1211,8 +1225,8 @@ const App = {
             const newName = input.value.trim() || d.name;
             d.name = newName;
             el.textContent = newName;
-            const saved = await Storage.getLayer(Number(id));
-            if (saved) Storage.saveLayer(Number(id), { ...saved, name: d.name });
+            const saved = await Storage.getLayer(id);
+            if (saved) Storage.saveLayer(id, { ...saved, name: d.name });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -1225,8 +1239,8 @@ const App = {
             if (vis) this.map.addLayer(d.layer);
             else this.map.removeLayer(d.layer);
             this.updateLabelOverlay();
-            Storage.getLayer(Number(id)).then(saved => {
-                if (saved) Storage.saveLayer(Number(id), { ...saved, visible: vis });
+            Storage.getLayer(id).then(saved => {
+                if (saved) Storage.saveLayer(id, { ...saved, visible: vis });
             });
         }
     },
@@ -1236,8 +1250,8 @@ const App = {
         if (d) {
             this.map.removeLayer(d.layer);
             delete this.importedLayers[id];
-            this._layerOrder = (this._layerOrder || []).filter(x => x !== id);
-            await Storage.removeLayer(Number(id));
+            this._layerOrder = (this._layerOrder || []).filter(x => String(x) !== String(id));
+            await Storage.removeLayer(id);
             this.updateImportedLayersList();
             this.updateLabelOverlay();
         }
