@@ -359,6 +359,24 @@ const App = {
             edit: { featureGroup: this.drawnItems, remove: true }
         });
         this.map.addControl(this.drawControl);
+        const origTooltip = L.Draw.Polyline.prototype._getTooltipText;
+        L.Draw.Polyline.prototype._getTooltipText = function () {
+            const r = origTooltip.call(this);
+            const ll = this._poly.getLatLngs();
+            if (ll.length >= 1 && this._currentLatLng) {
+                const p1 = ll[0], p2 = this._currentLatLng;
+                const toRad = Math.PI / 180;
+                const lat1 = p1.lat * toRad, lat2 = p2.lat * toRad;
+                const dLng = (p2.lng - p1.lng) * toRad;
+                const y = Math.sin(dLng) * Math.cos(lat2);
+                const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+                const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+                const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+                const dir = dirs[Math.round(bearing / 45) % 8];
+                r.subtext = (r.subtext ? r.subtext + '\n' : '') + `方位角: ${bearing.toFixed(1)}° (${dir})`;
+            }
+            return r;
+        };
     },
 
     initLocateControl() {
