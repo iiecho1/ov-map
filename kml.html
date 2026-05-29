@@ -1083,6 +1083,40 @@ function initCloudDb() {
 
 initCloudDb();
 
+async function compressGzip(str) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const cs = new CompressionStream('gzip');
+  const writer = cs.writable.getWriter();
+  writer.write(data);
+  writer.close();
+  const reader = cs.readable.getReader();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const length = chunks.reduce((s, c) => s + c.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
+async function compressedPost(url, bodyObj) {
+  const json = JSON.stringify(bodyObj);
+  const compressed = await compressGzip(json);
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+    body: compressed
+  });
+}
+
 $('btnSyncCloud').addEventListener('click', async () => {
   if (!lastKmlData) { alert('请先点击「生成 KML」'); return; }
 
@@ -1129,21 +1163,23 @@ $('btnSyncCloud').addEventListener('click', async () => {
   }
 
   try {
-    const uploadResp = await fetch(apiUrl + '/api/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: lastKmlData.name,
-        text: lastKmlData.text,
-        ext: 'kml'
-      })
+    const uploadResp = await compressedPost(apiUrl + '/api/files', {
+      name: lastKmlData.name,
+      text: lastKmlData.text,
+      ext: 'kml'
     });
     if (uploadResp.ok) {
       $('statusLeft').textContent = '已同步到后端: ' + lastKmlData.name;
       alert('已同步到后端服务器，可在主页面「云端同步」中导入');
     } else {
-      const err = await uploadResp.json().catch(() => ({}));
-      alert('同步失败: ' + (err.error || 'HTTP ' + uploadResp.status));
+      let msg = 'HTTP ' + uploadResp.status;
+      if (uploadResp.status === 413) {
+        msg = '文件过大，Cloudflare CDN 限制上传大小，请使用源站地址直连（绕过 CDN）';
+      } else {
+        const err = await uploadResp.json().catch(() => ({}));
+        if (err.error) msg = err.error;
+      }
+      alert('同步失败: ' + msg);
     }
   } catch (e) {
     alert('同步失败: ' + e.message);

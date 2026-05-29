@@ -209,7 +209,6 @@ const App = {
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
-            await this.loadCloudLayers();
         } catch (e) {
             console.error('Init failed:', e);
         }

@@ -8,6 +8,50 @@ function getApiUrl() {
     return (localStorage.getItem('ov-map-cloud-api') || '').replace(/\/+$/, '');
 }
 
+async function compressGzip(str) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    writer.write(data);
+    writer.close();
+    const reader = cs.readable.getReader();
+    const chunks = [];
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+    }
+    const length = chunks.reduce((s, c) => s + c.length, 0);
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return result;
+}
+
+async function compressedPost(url, bodyObj) {
+    const json = JSON.stringify(bodyObj);
+    const compressed = await compressGzip(json);
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+        body: compressed
+    });
+}
+
+async function compressedPut(url, bodyObj) {
+    const json = JSON.stringify(bodyObj);
+    const compressed = await compressGzip(json);
+    return fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+        body: compressed
+    });
+}
+
 const CloudStorage = {
     db: null,
 
@@ -99,12 +143,19 @@ const RemoteStorage = {
     async save(fileData) {
         const url = getApiUrl();
         if (!url) throw new Error('未配置 API 地址');
-        const resp = await fetch(url + '/api/files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fileData)
-        });
-        if (!resp.ok) throw new Error('上传失败');
+        const resp = await compressedPost(url + '/api/files', fileData);
+        if (!resp.ok) {
+            if (resp.status === 413) throw new Error('文件过大，Cloudflare CDN 限制上传大小');
+            throw new Error('上传失败 (HTTP ' + resp.status + ')');
+        }
+        return resp.json();
+    },
+
+    async update(id, data) {
+        const url = getApiUrl();
+        if (!url) throw new Error('未配置 API 地址');
+        const resp = await compressedPut(url + '/api/files/' + id, data);
+        if (!resp.ok) throw new Error('更新失败 (HTTP ' + resp.status + ')');
         return resp.json();
     },
 
