@@ -1265,8 +1265,20 @@ const App = {
             let d = 0;
             for (let i = 1; i < ll.length; i++) d += ll[i-1].distanceTo(ll[i]);
             label = '线段';
-            body = `<div class="value">长度: ${this.fmtD(d)}</div>`;
-            popupHtml = `<div class="popup-title">📏 ${label}</div><div class="popup-body">长度: <strong>${this.fmtD(d)}</strong></div>`;
+            let angleHtml = '';
+            if (ll.length >= 2) {
+                const bearing = this.calcBearing(ll[0], ll[ll.length - 1]);
+                const dir = this.bearingDir(bearing);
+                angleHtml = `<div class="value">方位角: ${bearing.toFixed(1)}° (${dir})</div>`;
+            }
+            body = `<div class="value">长度: ${this.fmtD(d)}</div>${angleHtml}`;
+            let popupAngle = '';
+            if (ll.length >= 2) {
+                const bearing = this.calcBearing(ll[0], ll[ll.length - 1]);
+                const dir = this.bearingDir(bearing);
+                popupAngle = `<br>方位角: <strong>${bearing.toFixed(1)}°</strong> (${dir})`;
+            }
+            popupHtml = `<div class="popup-title">📏 ${label}</div><div class="popup-body">长度: <strong>${this.fmtD(d)}</strong>${popupAngle}</div>`;
         } else if (type === 'polygon' || type === 'rectangle') {
             const ll = layer.getLatLngs()[0];
             label = type === 'rectangle' ? '矩形' : '多边形';
@@ -1290,6 +1302,18 @@ const App = {
         if (popupHtml) layer.bindPopup(popupHtml, { className: 'measure-popup' });
     },
 
+    calcBearing(p1, p2) {
+        const toRad = Math.PI / 180;
+        const lat1 = p1.lat * toRad, lat2 = p2.lat * toRad;
+        const dLng = (p2.lng - p1.lng) * toRad;
+        const y = Math.sin(dLng) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    },
+    bearingDir(b) {
+        const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+        return dirs[Math.round(b / 45) % 8];
+    },
     calcA(ll) { let a = 0; for (let i = 0, n = ll.length; i < n; i++) { const j = (i+1)%n; a += ll[i].lat*ll[j].lng - ll[j].lat*ll[i].lng; } return Math.abs(a)/2*111319.9*111319.9; },
     calcP(ll) { let p = 0; for (let i = 0; i < ll.length; i++) p += ll[i].distanceTo(ll[(i+1)%ll.length]); return p; },
     fmtD(m) { return m >= 1000 ? (m/1000).toFixed(2)+' 公里' : m.toFixed(2)+' 米'; },
