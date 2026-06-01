@@ -831,11 +831,12 @@ body {
         min-width: 140px;
         max-width: calc(100vw - 40px);
     }
-}
+
     .popup-key {
         width: auto;
         white-space: normal;
     }
+
     .popup-table td {
         display: block;
         width: 100%;
@@ -1065,7 +1066,6 @@ body {
         bottom: 10px;
         padding: 6px 10px;
         font-size: 11px;
-        gap: 10px;
         border-radius: 6px;
         flex-direction: column;
         gap: 2px;

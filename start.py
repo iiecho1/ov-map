@@ -19,7 +19,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
 if __name__ == "__main__":
-    with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
+    with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), Handler) as httpd:
         print(f"网页版奥维地图已启动")
         print(f"本地访问: http://localhost:{PORT}")
         print(f"按 Ctrl+C 停止服务")

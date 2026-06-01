@@ -61,10 +61,13 @@ const Storage = {
         });
     },
     saveLayer(id, data) {
-        if (!this.db) return;
-        const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
-        tx.onerror = () => console.error('Storage: saveLayer failed', id);
-        tx.objectStore(STORE_LAYERS).put({ id, ...data });
+        if (!this.db) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+            tx.onerror = () => { console.error('Storage: saveLayer failed', id); reject(tx.error); };
+            tx.oncomplete = () => resolve();
+            tx.objectStore(STORE_LAYERS).put({ id, ...data });
+        });
     },
     removeLayer(id) {
         if (!this.db) return;
@@ -112,10 +115,14 @@ const Storage = {
         });
     },
     clearAll() {
-        if (!this.db) return;
-        const tx = this.db.transaction([STORE_LAYERS, STORE_STATE], 'readwrite');
-        tx.objectStore(STORE_LAYERS).clear();
-        tx.objectStore(STORE_STATE).clear();
+        if (!this.db) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([STORE_LAYERS, STORE_STATE], 'readwrite');
+            tx.objectStore(STORE_LAYERS).clear();
+            tx.objectStore(STORE_STATE).clear();
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
     }
 };
 
@@ -867,7 +874,7 @@ const App = {
             done++;
             this.showLoading(`并行加载图层 (${done}/${total})...`);
         });
-        await this._runConcurrent(tasks, 8);
+        await this._runConcurrent(tasks, 4);
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
@@ -1117,6 +1124,7 @@ const App = {
     async handleFileImport(event) {
         const file = event.target.files[0];
         if (!file || this._importing) return;
+        if (file.size > 50 * 1024 * 1024) { alert('文件过大（超过 50MB），可能导致浏览器卡顿'); event.target.value = ''; return; }
         this._importing = true;
         const fileName = file.name, ext = file.name.split('.').pop().toLowerCase(), ci = this.colorIndex++;
         try {
@@ -1150,7 +1158,8 @@ const App = {
         if (!ids.length) { c.innerHTML = '<p class="empty-hint">暂无导入图层</p>'; return; }
         if (!this._layerOrder || !this._layerOrder.length) this._layerOrder = ids;
         this._layerOrder = this._layerOrder.filter(id => this.importedLayers[id]);
-        for (const id of ids) { if (!this._layerOrder.includes(id)) this._layerOrder.push(id); }
+        const orderSet = new Set(this._layerOrder);
+        for (const id of ids) { if (!orderSet.has(id)) this._layerOrder.push(id); }
 
         c.innerHTML = this._layerOrder.map((id, i) => {
             const d = this.importedLayers[id];
@@ -1331,7 +1340,7 @@ const App = {
             d.name = newName;
             el.textContent = newName;
             const saved = await Storage.getLayer(id);
-            if (saved) Storage.saveLayer(id, { ...saved, name: d.name });
+            if (saved) await Storage.saveLayer(id, { ...saved, name: d.name });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -1345,8 +1354,8 @@ const App = {
             else this.map.removeLayer(d.layer);
             this.updateLabelOverlay();
             Storage.getLayer(id).then(saved => {
-                if (saved) Storage.saveLayer(id, { ...saved, visible: vis });
-            });
+                if (saved) return Storage.saveLayer(id, { ...saved, visible: vis });
+            }).catch(e => console.error('toggleLayer save failed:', e));
         }
     },
 
@@ -1613,6 +1622,10 @@ const App = {
             const btn = document.querySelector('.sidebar-btn');
             if (btn) btn.classList.remove('active');
         }
+    },
+
+    _isMobile() {
+        return window.innerWidth <= 768;
     }
 };
 
