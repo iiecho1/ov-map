@@ -882,8 +882,8 @@ function generateKML() {
   const defaultPolyColor = hexToKmlColor(defFillColor, 90);
   const defaultBorderColor = hexToKmlColor(defLineColor, 100);
   const showDefaultBorder = $('showBorder').checked;
-  kml += `<Style id="defaultStyle">${showDefaultBorder?`<LineStyle><width>1</width><color>${defaultBorderColor}</color></LineStyle>`:''}<PolyStyle><color>${defaultPolyColor}</color></PolyStyle></Style>`;
-  for (const val in styleMap) { const s=styleMap[val]; kml+=`<Style id="${s.id}">${s.noBorder?'':`<LineStyle><width>${s.width}</width><color>${s.lineColor}</color></LineStyle>`}<PolyStyle><color>${s.polyColor}</color></PolyStyle></Style>`; }
+  kml += `<Style id="defaultStyle">${showDefaultBorder?`<LineStyle><width>1</width><color>${defaultBorderColor}</color></LineStyle>`:''}<PolyStyle>${showDefaultBorder?'':'<outline>0</outline>'}<color>${defaultPolyColor}</color></PolyStyle></Style>`;
+  for (const val in styleMap) { const s=styleMap[val]; kml+=`<Style id="${s.id}">${s.noBorder?'':`<LineStyle><width>${s.width}</width><color>${s.lineColor}</color></LineStyle>`}<PolyStyle>${s.noBorder?'<outline>0</outline>':''}<color>${s.polyColor}</color></PolyStyle></Style>`; }
   kml += '<Style id="btsname"><IconStyle><Icon /></IconStyle><LabelStyle><scale>0.6</scale><color>FFc0ffff</color></LabelStyle></Style>';
   kml += '<Folder><name>基站名称</name>';
   placemarks.forEach(p => { kml+=`<Placemark><name>${esc(p.label)}</name><styleUrl>#btsname</styleUrl><Point><extrude>1</extrude><altitudeMode>clampToGround</altitudeMode><coordinates>${p.lng},${p.lat},5</coordinates></Point></Placemark>`; });
