@@ -89,6 +89,7 @@
             </div>
         </div>
     </div>
+    <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" onclick="App.toggleSidebarCollapse()" title="折叠/展开菜单">&#10094;</button>
     <div id="map"></div>
     <div id="coordinates">
         <span id="cursorPos">经度: 0.000000, 纬度: 0.000000</span>
@@ -205,6 +206,19 @@
             startY = undefined;
             startCenter = undefined;
         });
+    })();
+    </script>
+    <script>
+    (function() {
+        var scrollTimer = null;
+        var el = document.querySelector('.sidebar-content');
+        if (el) {
+            el.addEventListener('scroll', function() {
+                el.classList.add('scrolling');
+                clearTimeout(scrollTimer);
+                scrollTimer = setTimeout(function() { el.classList.remove('scrolling'); }, 800);
+            }, { passive: true });
+        }
     })();
     </script>
 </body>

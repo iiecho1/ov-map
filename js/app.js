@@ -1216,6 +1216,93 @@ const App = {
             this.updateImportedLayersList();
             this.debouncedSave();
         });
+
+        this._bindLayerTouchDrag(container);
+    },
+
+    _bindLayerTouchDrag(container) {
+        let touchDragId = null;
+        let touchDragEl = null;
+        let clone = null;
+        let startX = 0, startY = 0;
+        let started = false;
+        let currentDropEl = null;
+        const DRAG_THRESHOLD = 8;
+
+        const clearIndicator = () => {
+            if (currentDropEl) { currentDropEl.style.borderTop = ''; currentDropEl = null; }
+        };
+
+        const getDropTarget = (x, y) => {
+            if (clone) clone.style.pointerEvents = 'none';
+            const el = document.elementFromPoint(x, y);
+            if (clone) clone.style.pointerEvents = '';
+            return el ? el.closest('.layer-item[draggable]') : null;
+        };
+
+        container.addEventListener('touchstart', e => {
+            if (e.touches.length !== 1) return;
+            const el = e.target.closest('.layer-item[draggable]');
+            if (!el) return;
+            const actionsBtn = e.target.closest('.layer-actions button');
+            if (actionsBtn) return;
+            const t = e.touches[0];
+            startX = t.clientX;
+            startY = t.clientY;
+            touchDragId = el.dataset.id;
+            touchDragEl = el;
+            started = false;
+        }, { passive: true });
+
+        container.addEventListener('touchmove', e => {
+            if (!touchDragId) return;
+            const t = e.touches[0];
+            if (!started) {
+                if (Math.abs(t.clientX - startX) < DRAG_THRESHOLD && Math.abs(t.clientY - startY) < DRAG_THRESHOLD) return;
+                started = true;
+                touchDragEl.style.opacity = '0.4';
+                clone = touchDragEl.cloneNode(true);
+                clone.style.cssText = 'position:fixed;left:0;top:0;z-index:10000;pointer-events:none;opacity:0.85;width:' + touchDragEl.offsetWidth + 'px;background:#2c3e50;border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+                document.body.appendChild(clone);
+            }
+            e.preventDefault();
+            clone.style.transform = 'translate(' + t.clientX + 'px,' + (t.clientY - touchDragEl.offsetHeight / 2) + 'px)';
+            clearIndicator();
+            const target = getDropTarget(t.clientX, t.clientY);
+            if (target && target.dataset.id !== touchDragId) {
+                target.style.borderTop = '2px solid #3498db';
+                currentDropEl = target;
+            }
+        }, { passive: false });
+
+        const finish = () => {
+            if (!touchDragId) return;
+            const dropEl = currentDropEl;
+            clearIndicator();
+            if (clone) { document.body.removeChild(clone); clone = null; }
+            if (touchDragEl) touchDragEl.style.opacity = '1';
+            if (started && dropEl) {
+                const dropId = dropEl.dataset.id;
+                if (dropId && dropId !== touchDragId) {
+                    const order = this._layerOrder;
+                    const dragStr = String(touchDragId);
+                    const fromIdx = order.findIndex(x => String(x) === dragStr);
+                    const toIdx = order.findIndex(x => String(x) === String(dropId));
+                    if (fromIdx >= 0 && toIdx >= 0) {
+                        order.splice(fromIdx, 1);
+                        order.splice(toIdx, 0, touchDragId);
+                        this.updateImportedLayersList();
+                        this.debouncedSave();
+                    }
+                }
+            }
+            touchDragId = null;
+            touchDragEl = null;
+            started = false;
+        };
+
+        container.addEventListener('touchend', finish, { passive: true });
+        container.addEventListener('touchcancel', finish, { passive: true });
     },
 
     moveLayer(id, dir) {
@@ -1507,6 +1594,16 @@ const App = {
         overlay.classList.toggle('show');
         if (btn) btn.classList.toggle('active');
         setTimeout(() => this.map.invalidateSize(), 300);
+    },
+
+    toggleSidebarCollapse() {
+        const sidebar = document.getElementById('sidebar');
+        const collapseBtn = document.getElementById('sidebarCollapseBtn');
+        sidebar.classList.toggle('collapsed');
+        const isCollapsed = sidebar.classList.contains('collapsed');
+        collapseBtn.innerHTML = isCollapsed ? '&#10095;' : '&#10094;';
+        collapseBtn.title = isCollapsed ? '展开菜单' : '折叠菜单';
+        setTimeout(() => this.map.invalidateSize(), 350);
     },
 
     closeSidebarOnMobile() {
