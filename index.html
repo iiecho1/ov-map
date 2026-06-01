@@ -143,5 +143,69 @@
     <script src="https://unpkg.com/@tmcw/togeojson@4.5.0/dist/togeojson.umd.js"></script>
     <script src="https://unpkg.com/togpx@0.5.4/togpx.js"></script>
     <script src="js/app.js"></script>
+    <script>
+    (function() {
+        let rightDown = false;
+        let startX, startY, startCenter;
+        const DRAG_THRESHOLD = 3;
+        let moved = false;
+        let pendingCtx = null;
+
+        const mapContainer = document.getElementById('map');
+
+        mapContainer.addEventListener('contextmenu', function(e) {
+            if (rightDown) {
+                e.preventDefault();
+                e.stopPropagation();
+                pendingCtx = {
+                    latlng: App.map.mouseEventToLatLng(e),
+                    cx: e.clientX,
+                    cy: e.clientY
+                };
+            }
+        }, true);
+
+        mapContainer.addEventListener('mousedown', function(e) {
+            if (e.button !== 2) return;
+            if (!App.map) return;
+            rightDown = true;
+            moved = false;
+            pendingCtx = null;
+            startX = e.clientX;
+            startY = e.clientY;
+            startCenter = App.map.getCenter();
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!rightDown) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (!moved && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+            if (!moved) {
+                moved = true;
+                pendingCtx = null;
+                mapContainer.style.cursor = 'grabbing';
+            }
+            const map = App.map;
+            const targetPixel = map.latLngToContainerPoint(startCenter);
+            const newPoint = L.point(targetPixel.x - dx, targetPixel.y - dy);
+            const newCenter = map.containerPointToLatLng(newPoint);
+            map.setView(newCenter, map.getZoom(), { animate: false });
+        });
+
+        document.addEventListener('mouseup', function(e) {
+            if (e.button !== 2 || !rightDown) return;
+            rightDown = false;
+            mapContainer.style.cursor = '';
+            if (!moved && pendingCtx) {
+                App._showContextMenu(pendingCtx.latlng, pendingCtx.cx, pendingCtx.cy);
+            }
+            pendingCtx = null;
+            startX = undefined;
+            startY = undefined;
+            startCenter = undefined;
+        });
+    })();
+    </script>
 </body>
 </html>
