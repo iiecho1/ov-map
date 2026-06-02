@@ -606,9 +606,7 @@ function expandAzimuthRows() {
     const val = String(row[azCol] ?? '');
     if (val.includes('_')) {
       val.split('_').forEach(v => {
-        const newRow = Object.assign({}, row);
-        newRow[azCol] = v.trim();
-        expanded.push(newRow);
+        expanded.push({...row, [azCol]: v.trim()});
       });
     } else {
       expanded.push(row);
@@ -858,7 +856,7 @@ function generateKML() {
       const points = makeSectorPoints(lat, lng, azimuth, angle/2, radius, 20, shape);
       coords = points.map(p => `${p[1]},${p[0]},5`).join(' ');
     }
-    placemarks.push({label, lat, lng, coords, row, fillColor, lineColor, fillOpacity, noBorder});
+    placemarks.push({label, lat, lng, coords, row, fillColor, lineColor, fillOpacity, noBorder, _area: 0});
     count++;
   });
 
@@ -878,6 +876,14 @@ function generateKML() {
     styleMap[val] = {id:'diy'+i, polyColor:hexToKmlColor(st.fillColor,st.opacity), lineColor:hexToKmlColor(st.lineColor,100), width:1, noBorder:!!st.noBorder};
   });
 
+  for (const p of placemarks) {
+    if (!p.coords) continue;
+    const pts = p.coords.split(' ').map(c => { const q = c.split(','); return [parseFloat(q[0]), parseFloat(q[1])]; });
+    let s = 0;
+    for (let i = 0; i < pts.length - 1; i++) s += pts[i][0]*pts[i+1][1] - pts[i+1][0]*pts[i][1];
+    p._area = Math.abs(s) / 2;
+  }
+
   let kml = '<?xml version="1.0" encoding="utf-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>';
   const defaultPolyColor = hexToKmlColor(defFillColor, 90);
   const defaultBorderColor = hexToKmlColor(defLineColor, 100);
@@ -888,18 +894,7 @@ function generateKML() {
   kml += '<Folder><name>基站名称</name>';
   placemarks.forEach(p => { kml+=`<Placemark><name>${esc(p.label)}</name><styleUrl>#btsname</styleUrl><Point><extrude>1</extrude><altitudeMode>clampToGround</altitudeMode><coordinates>${p.lng},${p.lat},5</coordinates></Point></Placemark>`; });
   kml += '</Folder><Folder><name>基站扇区</name>';
-  placemarks.sort((a, b) => {
-    if (!a.coords && !b.coords) return 0;
-    if (!a.coords) return 1;
-    if (!b.coords) return -1;
-    const calcArea = coords => {
-      const pts = coords.split(' ').map(c => { const p = c.split(','); return [parseFloat(p[0]), parseFloat(p[1])]; });
-      let s = 0;
-      for (let i = 0; i < pts.length - 1; i++) s += pts[i][0]*pts[i+1][1] - pts[i+1][0]*pts[i][1];
-      return Math.abs(s) / 2;
-    };
-    return calcArea(b.coords) - calcArea(a.coords);
-  });
+  placemarks.sort((a, b) => (b._area || 0) - (a._area || 0));
   placemarks.forEach(p => {
     let desc="<![CDATA[<table width='300' border='1'>"; selectedCols.forEach(col=>{desc+=`<tr><th scope="col">${esc(col)}</th><th scope="col">${esc(String(p.row[col]||''))}</th></tr>`;}); desc+='</table>]]>';
     let styleUrl='<styleUrl>#defaultStyle</styleUrl>';

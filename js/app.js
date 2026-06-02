@@ -206,6 +206,7 @@ const App = {
     colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [], _flatLabelCache: null,
     _cursorRaf: null, _cursorLatest: null, _layerListRaf: null,
     _dom: {},
+    _popupLru: null,
 
     _cacheDom() {
         const ids = ['searchInput', 'searchResults', 'apiKeyBox', 'apiKeyInput', 'cursorPos', 'zoomLevel', 'contextMenu', 'ctxCoord', 'fileInput', 'importedLayers', 'measureResults', 'loadingOverlay'];
@@ -215,6 +216,7 @@ const App = {
     async init() {
         try {
             this._cacheDom();
+            this._popupLru = new Map();
             this.showLoading('初始化中...');
             await new Promise(r => requestAnimationFrame(r));
             await Promise.all([Storage.init(), CloudReader.init()]);
@@ -327,9 +329,13 @@ const App = {
     _getFlatLabelCache() {
         if (this._flatLabelCache) return this._flatLabelCache;
         const flat = [];
-        for (const data of Object.values(this.importedLayers)) {
+        const layers = this.importedLayers;
+        for (const id in layers) {
+            const data = layers[id];
             if (!data._labelCache || !this.map.hasLayer(data.layer)) continue;
-            for (const item of data._labelCache) {
+            const cache = data._labelCache;
+            for (let i = 0; i < cache.length; i++) {
+                const item = cache[i];
                 if (!item._c) {
                     if (item.type === 'point') item._c = item.latlng;
                     else if (item.bounds) item._c = item.bounds.getCenter();
@@ -609,8 +615,8 @@ const App = {
             if (!data._searchIndex) this._buildSearchIndex(layerId);
             const ln = data.name;
             for (const item of data._searchIndex) {
-                for (const t of item.texts) {
-                    if (t.includes(q)) { matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng }); break; }
+                if (item.text.includes(q)) {
+                    matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
                 }
             }
         }
@@ -625,6 +631,11 @@ const App = {
         const m = this._lastSearch?.[i];
         if (!m) return;
         if (m.latlng) this.map.setView(m.latlng, 17);
+        if (m.layer._popupFeature && !m.layer._popupBound) {
+            m.layer._popupBound = true;
+            const html = App.getPopup(m.layer._popupFeature);
+            if (html) m.layer.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
+        }
         if (m.layer.openPopup) m.layer.openPopup();
         this._dom.searchResults.classList.remove('has-items');
         this.closeSidebarOnMobile();
@@ -643,14 +654,13 @@ const App = {
         data.layer.eachLayer(sub => {
             const f = sub.feature;
             if (!f?.properties) return;
-            const texts = [];
             const name = f.properties.name || '';
-            if (name) texts.push(name.toLowerCase());
+            let combined = name.toLowerCase();
             for (const [k, v] of Object.entries(f.properties)) {
                 if (skip.has(k) || k.startsWith('_') || k === 'name') continue;
-                if (v) texts.push(String(v).toLowerCase());
+                if (v) combined += '\x00' + String(v).toLowerCase();
             }
-            index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), texts });
+            index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), text: combined });
         });
         data._searchIndex = index;
     },
@@ -836,7 +846,7 @@ const App = {
         });
     },
 
-    debouncedSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => { const c = this.map.getCenter(); Storage.saveState({ center: [c.lat, c.lng], zoom: this.map.getZoom(), baseLayer: this.currentBaseLayer, layerOrder: this._layerOrder || [] }); }, 300); },
+    debouncedSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => { const c = this.map.getCenter(); const newState = { center: [c.lat, c.lng], zoom: this.map.getZoom(), baseLayer: this.currentBaseLayer, layerOrder: this._layerOrder || [] }; const sig = newState.center[0]+','+newState.center[1]+','+newState.zoom+','+newState.baseLayer+','+newState.layerOrder.join(','); if (sig === this._lastSaveSig) return; this._lastSaveSig = sig; Storage.saveState(newState); }, 300); },
 
     async restoreState() {
         const s = await Storage.getState();
@@ -1015,18 +1025,22 @@ const App = {
     _skipProps: new Set(['styleUrl', 'styleHash', '_kmlStyle', '_styleUrl', '_kmlDescription']),
 
     getPopup(f) {
-        if (f._popupHtml !== undefined) return f._popupHtml;
+        const id = f._popupId ?? (f._popupId = (this._popupIdCounter = (this._popupIdCounter || 0) + 1));
+        const cached = this._popupLru.get(id);
+        if (cached !== undefined) { this._popupLru.delete(id); this._popupLru.set(id, cached); return cached; }
         const kd = f.properties?._kmlDescription;
-        if (kd) { f._popupHtml = kd; return kd; }
-        if (!f.properties) { f._popupHtml = ''; return ''; }
+        if (kd) { this._popupLru.set(id, kd); if (this._popupLru.size > 500) this._popupLru.delete(this._popupLru.keys().next().value); return kd; }
+        if (!f.properties) { this._popupLru.set(id, ''); return ''; }
         const entries = Object.entries(f.properties).filter(([k, v]) => v && !this._skipProps.has(k));
-        if (!entries.length) { f._popupHtml = ''; return ''; }
+        if (!entries.length) { this._popupLru.set(id, ''); return ''; }
         let h = '';
         if (f.properties.name) h += `<div class="popup-title">${this.escH(f.properties.name)}</div>`;
         h += '<table class="popup-table">';
         for (const [k, v] of entries) { if (k !== 'name') h += `<tr><td class="popup-key">${this.escH(k)}</td><td class="popup-val">${this.escH(String(v))}</td></tr>`; }
-        f._popupHtml = h + '</table>';
-        return f._popupHtml;
+        const html = h + '</table>';
+        this._popupLru.set(id, html);
+        if (this._popupLru.size > 500) this._popupLru.delete(this._popupLru.keys().next().value);
+        return html;
     },
 
     async renderLayerAsync(text, ext, fileName, layerId, ci, onProgress) {
@@ -1093,8 +1107,15 @@ const App = {
                 }
 
                 if (layer) {
-                    const html = self.getPopup(f);
-                    if (html) layer.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
+                    layer._popupFeature = f;
+                    layer.on('click', function () {
+                        if (!this._popupBound) {
+                            this._popupBound = true;
+                            const html = App.getPopup(this._popupFeature);
+                            if (html) this.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
+                            this.openPopup();
+                        }
+                    });
                     group.addLayer(layer);
                 }
             }
@@ -1353,9 +1374,23 @@ const App = {
             if (vis) this.map.addLayer(d.layer);
             else this.map.removeLayer(d.layer);
             this.updateLabelOverlay();
-            Storage.getLayer(id).then(saved => {
-                if (saved) return Storage.saveLayer(id, { ...saved, visible: vis });
-            }).catch(e => console.error('toggleLayer save failed:', e));
+            if (Storage.db) {
+                const tx = Storage.db.transaction(STORE_LAYERS, 'readwrite');
+                const store = tx.objectStore(STORE_LAYERS);
+                const req = store.get(String(id));
+                req.onsuccess = () => {
+                    const saved = req.result;
+                    if (saved) { saved.visible = vis; store.put(saved); }
+                };
+                const nid = Number(id);
+                if (!isNaN(nid)) {
+                    const req2 = store.get(nid);
+                    req2.onsuccess = () => {
+                        const saved = req2.result;
+                        if (saved) { saved.visible = vis; store.put(saved); }
+                    };
+                }
+            }
         }
     },
 
