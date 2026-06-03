@@ -43,7 +43,7 @@ body {
 
 .app {
   width: 100%;
-  max-width: 1100px;
+  max-width: 900px;
   background: var(--surface);
   border-radius: 16px;
   overflow: hidden;
@@ -162,12 +162,6 @@ select option { background: var(--surface); }
 .file-zone .hint strong { color: var(--accent); }
 .file-zone.loaded { border-color: var(--success); border-style: solid; }
 .file-zone.loaded .icon::after { content: " ✅"; font-size: 16px; }
-
-.upload-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
 
 .btn {
   padding: 7px 16px;
@@ -327,7 +321,6 @@ select option { background: var(--surface); }
   .app { border-radius: 12px; }
   .content { padding: 16px 14px; gap: 14px; }
   .card-body { padding: 12px; }
-  .upload-grid { grid-template-columns: 1fr; }
   .match-bar { flex-direction: column; }
 }
 </style>
@@ -343,51 +336,40 @@ select option { background: var(--surface); }
   </div>
 
   <div class="content">
+
     <div class="card">
       <div class="card-header">
-        <span class="dot"></span> 上传数据
+        <span class="dot"></span> 表格1（基准地点）
       </div>
       <div class="card-body">
-        <div class="upload-grid">
-          <div>
-            <div class="file-zone" id="zone1">
-              <input type="file" id="fileInput1" accept=".xlsx,.xls,.csv" />
-              <span class="icon">📂</span>
-              <span class="hint">上传 <strong>表格1</strong>（基准地点）<br>Excel / CSV</span>
-            </div>
-            <div class="file-info" id="fileInfo1"></div>
-          </div>
-          <div>
-            <div class="file-zone" id="zone2">
-              <input type="file" id="fileInput2" accept=".xlsx,.xls,.csv" />
-              <span class="icon">📂</span>
-              <span class="hint">上传 <strong>表格2</strong>（候选地点）<br>Excel / CSV</span>
-            </div>
-            <div class="file-info" id="fileInfo2"></div>
-          </div>
+        <div class="file-zone" id="zone1">
+          <input type="file" id="fileInput1" accept=".xlsx,.xls,.csv" />
+          <span class="icon">📂</span>
+          <span class="hint">点击或拖拽 <strong>Excel / CSV</strong> 文件</span>
         </div>
+        <div class="file-info" id="fileInfo1"></div>
+        <div class="row" id="sheetRow1" style="display:none"><label>数据源</label><select id="sheetSelect1"></select></div>
+        <div class="row" id="nameRow1" style="display:none"><label>名称</label><select id="nameCol1"></select></div>
+        <div class="row" id="lngRow1" style="display:none"><label>经度</label><select id="lngCol1"></select></div>
+        <div class="row" id="latRow1" style="display:none"><label>纬度</label><select id="latCol1"></select></div>
       </div>
     </div>
 
-    <div class="card" id="mappingCard" style="display:none">
+    <div class="card">
       <div class="card-header">
-        <span class="dot"></span> 字段映射
+        <span class="dot" style="background:var(--success)"></span> 表格2（候选地点）
       </div>
       <div class="card-body">
-        <div class="upload-grid">
-          <div>
-            <div style="font-size:11px;color:var(--accent);margin-bottom:8px;font-weight:600">表格1（基准）</div>
-            <div class="row"><label>名称</label><select id="nameCol1"></select></div>
-            <div class="row"><label>经度</label><select id="lngCol1"></select></div>
-            <div class="row"><label>纬度</label><select id="latCol1"></select></div>
-          </div>
-          <div>
-            <div style="font-size:11px;color:var(--success);margin-bottom:8px;font-weight:600">表格2（候选）</div>
-            <div class="row"><label>名称</label><select id="nameCol2"></select></div>
-            <div class="row"><label>经度</label><select id="lngCol2"></select></div>
-            <div class="row"><label>纬度</label><select id="latCol2"></select></div>
-          </div>
+        <div class="file-zone" id="zone2">
+          <input type="file" id="fileInput2" accept=".xlsx,.xls,.csv" />
+          <span class="icon">📂</span>
+          <span class="hint">点击或拖拽 <strong>Excel / CSV</strong> 文件</span>
         </div>
+        <div class="file-info" id="fileInfo2"></div>
+        <div class="row" id="sheetRow2" style="display:none"><label>数据源</label><select id="sheetSelect2"></select></div>
+        <div class="row" id="nameRow2" style="display:none"><label>名称</label><select id="nameCol2"></select></div>
+        <div class="row" id="lngRow2" style="display:none"><label>经度</label><select id="lngCol2"></select></div>
+        <div class="row" id="latRow2" style="display:none"><label>纬度</label><select id="latCol2"></select></div>
       </div>
     </div>
 
@@ -428,34 +410,29 @@ select option { background: var(--surface); }
 <script>
 const $ = id => document.getElementById(id);
 
-let data1 = [], headers1 = [];
-let data2 = [], headers2 = [];
+let wb1 = null, wb2 = null;
+let headers1 = [], data1 = [];
+let headers2 = [], data2 = [];
 let matchResults = [];
 
 function autoSelect(sel, keywords) {
-  if (sel.value) return;
   for (const kw of keywords) {
     const found = [...sel.options].find(o => o.value.toLowerCase().includes(kw.toLowerCase()));
     if (found) { sel.value = found.value; return; }
   }
 }
 
-function parseFile(file, callback) {
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const wb = XLSX.read(ev.target.result, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
-    if (json.length < 2) { alert('文件数据不足'); return; }
-    const headers = json[0].map(h => String(h).trim());
-    const rows = json.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((h, i) => obj[h] = row[i] !== undefined ? row[i] : '');
-      return obj;
-    });
-    callback(headers, rows);
-  };
-  reader.readAsArrayBuffer(file);
+function parseSheet(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  if (json.length < 2) return null;
+  const headers = json[0].map(h => String(h).trim());
+  const rows = json.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i] !== undefined ? row[i] : '');
+    return obj;
+  });
+  return { headers, rows };
 }
 
 function populateSelect(sel, headers, keywords) {
@@ -468,16 +445,92 @@ function populateSelect(sel, headers, keywords) {
   if (keywords) autoSelect(sel, keywords);
 }
 
+function showMapping(idx, wb, sheetNames, headers, rows) {
+  const sheetRow = $('sheetRow' + idx);
+  const sheetSel = $('sheetSelect' + idx);
+
+  if (sheetNames.length > 0) {
+    sheetRow.style.display = '';
+    sheetSel.innerHTML = '';
+    sheetNames.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sheetSel.appendChild(opt);
+    });
+  }
+
+  ['nameRow','lngRow','latRow'].forEach(id => $(id + idx).style.display = '');
+
+  const nameKw = ['名称', 'name', 'label', '站点名', '基站名称'];
+  const lngKw = ['Longitude', '经度', 'lng', 'longitude', 'lon'];
+  const latKw = ['Latitude', '纬度', 'lat', 'latitude'];
+
+  populateSelect($('nameCol' + idx), headers, nameKw);
+  populateSelect($('lngCol' + idx), headers, lngKw);
+  populateSelect($('latCol' + idx), headers, latKw);
+
+  if (idx === 1) { headers1 = headers; data1 = rows; }
+  else { headers2 = headers; data2 = rows; }
+
+  checkBothLoaded();
+}
+
+function loadSheetFor(idx, wb, sheetName) {
+  const result = parseSheet(wb, sheetName);
+  if (!result) { alert('该工作表数据不足'); return; }
+
+  const nameCol = $('nameCol' + idx);
+  const lngCol = $('lngCol' + idx);
+  const latCol = $('latCol' + idx);
+  const curName = nameCol.value, curLng = lngCol.value, curLat = latCol.value;
+
+  populateSelect(nameCol, result.headers, null);
+  populateSelect(lngCol, result.headers, null);
+  populateSelect(latCol, result.headers, null);
+
+  if (result.headers.includes(curName)) nameCol.value = curName;
+  else autoSelect(nameCol, ['名称', 'name', 'label', '站点名', '基站名称']);
+  if (result.headers.includes(curLng)) lngCol.value = curLng;
+  else autoSelect(lngCol, ['Longitude', '经度', 'lng', 'longitude', 'lon']);
+  if (result.headers.includes(curLat)) latCol.value = curLat;
+  else autoSelect(latCol, ['Latitude', '纬度', 'lat', 'latitude']);
+
+  if (idx === 1) { headers1 = result.headers; data1 = result.rows; }
+  else { headers2 = result.headers; data2 = result.rows; }
+
+  checkBothLoaded();
+}
+
 $('fileInput1').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
   $('fileInfo1').textContent = '✅ ' + file.name + ' (' + (file.size/1024).toFixed(1) + 'KB)';
   $('zone1').classList.add('loaded');
-  parseFile(file, (headers, rows) => {
-    headers1 = headers;
-    data1 = rows;
-    checkBothLoaded();
-  });
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在导入表格1...';
+  overlay.classList.add('show');
+  const reader = new FileReader();
+  reader.onload = ev => {
+    setTimeout(() => {
+      wb1 = XLSX.read(ev.target.result, { type: 'array' });
+      const result = parseSheet(wb1, wb1.SheetNames[0]);
+      overlay.classList.remove('show');
+      if (!result) { alert('文件数据不足'); return; }
+      showMapping(1, wb1, wb1.SheetNames, result.headers, result.rows);
+    }, 30);
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+$('sheetSelect1').addEventListener('change', e => {
+  if (!wb1) return;
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在加载工作表...';
+  overlay.classList.add('show');
+  setTimeout(() => {
+    loadSheetFor(1, wb1, e.target.value);
+    overlay.classList.remove('show');
+  }, 30);
 });
 
 $('fileInput2').addEventListener('change', e => {
@@ -485,27 +538,37 @@ $('fileInput2').addEventListener('change', e => {
   if (!file) return;
   $('fileInfo2').textContent = '✅ ' + file.name + ' (' + (file.size/1024).toFixed(1) + 'KB)';
   $('zone2').classList.add('loaded');
-  parseFile(file, (headers, rows) => {
-    headers2 = headers;
-    data2 = rows;
-    checkBothLoaded();
-  });
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在导入表格2...';
+  overlay.classList.add('show');
+  const reader = new FileReader();
+  reader.onload = ev => {
+    setTimeout(() => {
+      wb2 = XLSX.read(ev.target.result, { type: 'array' });
+      const result = parseSheet(wb2, wb2.SheetNames[0]);
+      overlay.classList.remove('show');
+      if (!result) { alert('文件数据不足'); return; }
+      showMapping(2, wb2, wb2.SheetNames, result.headers, result.rows);
+    }, 30);
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+$('sheetSelect2').addEventListener('change', e => {
+  if (!wb2) return;
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在加载工作表...';
+  overlay.classList.add('show');
+  setTimeout(() => {
+    loadSheetFor(2, wb2, e.target.value);
+    overlay.classList.remove('show');
+  }, 30);
 });
 
 function checkBothLoaded() {
   if (data1.length && data2.length) {
-    $('mappingCard').style.display = '';
     $('matchCard').style.display = '';
-
-    populateSelect($('nameCol1'), headers1, ['名称', 'name', 'label', '站点名', '基站名称']);
-    populateSelect($('lngCol1'), headers1, ['经度', 'lng', 'longitude', 'lon']);
-    populateSelect($('latCol1'), headers1, ['纬度', 'lat', 'latitude']);
-
-    populateSelect($('nameCol2'), headers2, ['名称', 'name', 'label', '站点名', '基站名称']);
-    populateSelect($('lngCol2'), headers2, ['经度', 'lng', 'longitude', 'lon']);
-    populateSelect($('latCol2'), headers2, ['纬度', 'lat', 'latitude']);
-
-    $('statusLeft').textContent = '两个表格已加载，表格1: ' + data1.length + ' 行，表格2: ' + data2.length + ' 行';
+    $('statusLeft').textContent = '表格1: ' + data1.length + ' 行，表格2: ' + data2.length + ' 行';
   }
 }
 
@@ -565,24 +628,16 @@ $('btnMatch').addEventListener('click', () => {
       const distances = parsed2.map(p => ({
         name: p.name,
         dist: haversine(lat, lng, p.lat, p.lng),
-        lng: p.lng,
-        lat: p.lat
       }));
 
       distances.sort((a, b) => a.dist - b.dist);
       const nearest = distances.slice(0, topN);
 
-      nearest.forEach((n, rank) => {
-        matchResults.push({
-          sourceName,
-          sourceLng: lng,
-          sourceLat: lat,
-          matchName: n.name,
-          matchLng: n.lng,
-          matchLat: n.lat,
-          distance: n.dist,
-          rank: rank + 1
-        });
+      matchResults.push({
+        sourceName,
+        sourceLng: lng,
+        sourceLat: lat,
+        matches: nearest
       });
     });
 
@@ -590,7 +645,7 @@ $('btnMatch').addEventListener('click', () => {
 
     renderResults(topN);
 
-    let statusText = '匹配完成: ' + data1.length + ' 个基准点 → ' + matchResults.length + ' 条匹配结果';
+    let statusText = '匹配完成: ' + matchResults.length + ' 个基准点，每个匹配 ' + topN + ' 个候选点';
     if (errCount > 0) statusText += '（跳过 ' + errCount + ' 行无效数据）';
     $('statusLeft').textContent = statusText;
   }, 50);
@@ -600,37 +655,40 @@ function renderResults(topN) {
   $('resultCard').style.display = '';
   $('btnExport').style.display = '';
 
-  const uniqueSources = new Set(matchResults.map(r => r.sourceName));
-  $('resultCount').textContent = '(' + uniqueSources.size + ' 个基准点, ' + matchResults.length + ' 条结果)';
+  $('resultCount').textContent = '(' + matchResults.length + ' 个基准点)';
 
   let html = '<table class="result-table"><thead><tr>';
-  html += '<th>序号</th><th>基准地点</th><th>基准经度</th><th>基准纬度</th>';
-  html += '<th>排名</th><th>最近地点</th><th>候选经度</th><th>候选纬度</th><th>距离</th>';
+  html += '<th>基站中文名</th><th>经度</th><th>纬度</th>';
+  for (let i = 1; i <= topN; i++) {
+    html += '<th>第' + i + '近距离(米)</th><th>第' + i + '近基站中文名</th>';
+  }
   html += '</tr></thead><tbody>';
 
-  matchResults.forEach((r, i) => {
+  matchResults.forEach(r => {
     html += '<tr>';
-    html += '<td>' + (i + 1) + '</td>';
     html += '<td class="col-source">' + esc(r.sourceName) + '</td>';
     html += '<td>' + r.sourceLng.toFixed(6) + '</td>';
     html += '<td>' + r.sourceLat.toFixed(6) + '</td>';
-    html += '<td><span class="tag">#' + r.rank + '</span></td>';
-    html += '<td class="col-match">' + esc(r.matchName) + '</td>';
-    html += '<td>' + r.matchLng.toFixed(6) + '</td>';
-    html += '<td>' + r.matchLat.toFixed(6) + '</td>';
-    html += '<td class="col-dist">' + formatDist(r.distance) + '</td>';
+    for (let i = 0; i < topN; i++) {
+      if (i < r.matches.length) {
+        html += '<td class="col-dist">' + Math.round(r.matches[i].dist * 10) / 10 + '</td>';
+        html += '<td class="col-match">' + esc(r.matches[i].name) + '</td>';
+      } else {
+        html += '<td></td><td></td>';
+      }
+    }
     html += '</tr>';
   });
 
   html += '</tbody></table>';
   $('resultBody').innerHTML = html;
 
-  const total = matchResults.length;
-  const avgDist = matchResults.reduce((s, r) => s + r.distance, 0) / total;
-  const minDist = Math.min(...matchResults.map(r => r.distance));
-  const maxDist = Math.max(...matchResults.map(r => r.distance));
+  const allDists = matchResults.flatMap(r => r.matches.map(m => m.dist));
+  const avgDist = allDists.reduce((s, d) => s + d, 0) / allDists.length;
+  const minDist = Math.min(...allDists);
+  const maxDist = Math.max(...allDists);
   $('resultSummary').innerHTML =
-    '共 <strong>' + total + '</strong> 条结果 | ' +
+    '共 <strong>' + matchResults.length + '</strong> 个基准点 | ' +
     '平均距离: <strong>' + formatDist(avgDist) + '</strong> | ' +
     '最近: <strong>' + formatDist(minDist) + '</strong> | ' +
     '最远: <strong>' + formatDist(maxDist) + '</strong>';
@@ -639,16 +697,24 @@ function renderResults(topN) {
 $('btnExport').addEventListener('click', () => {
   if (!matchResults.length) { alert('没有可导出的结果'); return; }
 
-  const exportData = matchResults.map(r => ({
-    '基准地点': r.sourceName,
-    '基准经度': r.sourceLng,
-    '基准纬度': r.sourceLat,
-    '排名': r.rank,
-    '最近地点': r.matchName,
-    '候选经度': r.matchLng,
-    '候选纬度': r.matchLat,
-    '距离(米)': Math.round(r.distance * 10) / 10
-  }));
+  const topN = matchResults[0].matches.length;
+  const exportData = matchResults.map(r => {
+    const obj = {
+      '基站中文名': r.sourceName,
+      'lon': r.sourceLng,
+      'lat': r.sourceLat,
+    };
+    for (let i = 0; i < topN; i++) {
+      if (i < r.matches.length) {
+        obj['第' + (i+1) + '近距离(米)'] = Math.round(r.matches[i].dist * 10) / 10;
+        obj['第' + (i+1) + '近基站中文名'] = r.matches[i].name;
+      } else {
+        obj['第' + (i+1) + '近距离(米)'] = '';
+        obj['第' + (i+1) + '近基站中文名'] = '';
+      }
+    }
+    return obj;
+  });
 
   const ws = XLSX.utils.json_to_sheet(exportData);
   const wb = XLSX.utils.book_new();

@@ -637,7 +637,6 @@ function populateColumnSelects() {
 
 function autoSelect(id, keywords) {
   const sel = $(id);
-  if (sel.value) return;
   for (const kw of keywords) {
     const found = currentHeaders.find(h => h.toLowerCase().includes(kw.toLowerCase()));
     if (found) {sel.value = found; return;}
