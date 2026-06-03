@@ -4,6 +4,7 @@
   "framework": null,
   "rewrites": [
     { "source": "/admin", "destination": "/admin.html" },
-    { "source": "/kml", "destination": "/kml.html" }
+    { "source": "/kml", "destination": "/kml.html" },
+    { "source": "/match", "destination": "/match.html" }
   ]
 }

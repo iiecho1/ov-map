@@ -1145,7 +1145,6 @@ const App = {
     async handleFileImport(event) {
         const file = event.target.files[0];
         if (!file || this._importing) return;
-        if (file.size > 50 * 1024 * 1024) { alert('文件过大（超过 50MB），可能导致浏览器卡顿'); event.target.value = ''; return; }
         this._importing = true;
         const fileName = file.name, ext = file.name.split('.').pop().toLowerCase(), ci = this.colorIndex++;
         try {
