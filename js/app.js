@@ -764,6 +764,7 @@ const App = {
         });
 
         document.getElementById('sidebar').addEventListener('click', e => {
+            if (e.target.closest('.layer-actions') || e.target.closest('.layer-item-name') || e.target.type === 'checkbox') return;
             if (e.target.closest('.layer-item') || e.target.closest('.search-result-item') || e.target.closest('.btn')) {
                 this.closeSidebarOnMobile();
             }
