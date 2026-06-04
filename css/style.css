@@ -844,6 +844,18 @@ body {
     }
 }
 
+.popup-layer-tag {
+    font-size: 11px;
+    color: #3498db;
+    background: #e8f4fd;
+    padding: 3px 8px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    font-weight: 500;
+    word-break: break-all;
+    border-left: 3px solid #3498db;
+}
+
 .popup-title {
     font-size: 14px;
     font-weight: bold;

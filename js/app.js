@@ -633,7 +633,7 @@ const App = {
         if (m.latlng) this.map.setView(m.latlng, 17);
         if (m.layer._popupFeature && !m.layer._popupBound) {
             m.layer._popupBound = true;
-            const html = App.getPopup(m.layer._popupFeature);
+            const html = App.getPopup(m.layer._popupFeature, m.layer._layerName);
             if (html) m.layer.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
         }
         if (m.layer.openPopup) m.layer.openPopup();
@@ -1025,17 +1025,25 @@ const App = {
 
     _skipProps: new Set(['styleUrl', 'styleHash', '_kmlStyle', '_styleUrl', '_kmlDescription']),
 
-    getPopup(f) {
+    getPopup(f, layerName) {
         const id = f._popupId ?? (f._popupId = (this._popupIdCounter = (this._popupIdCounter || 0) + 1));
         const cached = this._popupLru.get(id);
         if (cached !== undefined) { this._popupLru.delete(id); this._popupLru.set(id, cached); return cached; }
+        const featureName = f.properties?.name || '';
         const kd = f.properties?._kmlDescription;
-        if (kd) { this._popupLru.set(id, kd); if (this._popupLru.size > 500) this._popupLru.delete(this._popupLru.keys().next().value); return kd; }
+        if (kd) {
+            let h = '';
+            if (layerName) h += `<div class="popup-layer-tag">${this.escH(layerName)}</div>`;
+            if (featureName) h += `<div class="popup-title">${this.escH(featureName)}</div>`;
+            const result = h + kd;
+            this._popupLru.set(id, result); if (this._popupLru.size > 500) this._popupLru.delete(this._popupLru.keys().next().value); return result;
+        }
         if (!f.properties) { this._popupLru.set(id, ''); return ''; }
         const entries = Object.entries(f.properties).filter(([k, v]) => v && !this._skipProps.has(k));
         if (!entries.length) { this._popupLru.set(id, ''); return ''; }
         let h = '';
-        if (f.properties.name) h += `<div class="popup-title">${this.escH(f.properties.name)}</div>`;
+        if (layerName) h += `<div class="popup-layer-tag">${this.escH(layerName)}</div>`;
+        if (featureName) h += `<div class="popup-title">${this.escH(featureName)}</div>`;
         h += '<table class="popup-table">';
         for (const [k, v] of entries) { if (k !== 'name') h += `<tr><td class="popup-key">${this.escH(k)}</td><td class="popup-val">${this.escH(String(v))}</td></tr>`; }
         const html = h + '</table>';
@@ -1109,10 +1117,11 @@ const App = {
 
                 if (layer) {
                     layer._popupFeature = f;
+                    layer._layerName = fileName;
                     layer.on('click', function () {
                         if (!this._popupBound) {
                             this._popupBound = true;
-                            const html = App.getPopup(this._popupFeature);
+                            const html = App.getPopup(this._popupFeature, this._layerName);
                             if (html) this.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
                             this.openPopup();
                         }
