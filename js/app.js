@@ -786,19 +786,32 @@ const App = {
         this._longPressFired = false;
         this._ctxTouchPos = null;
         this._pendingContextLatLng = null;
+        this._popupOpen = false;
+
+        this.map.on('popupopen', e => {
+            this._popupOpen = true;
+            const wrapper = e.popup.getElement();
+            if (wrapper) {
+                wrapper.addEventListener('contextmenu', ev => { ev.stopPropagation(); }, true);
+                wrapper.addEventListener('touchstart', ev => { ev.stopPropagation(); }, true);
+                wrapper.addEventListener('touchmove', ev => { ev.stopPropagation(); }, true);
+                wrapper.addEventListener('touchend', ev => { ev.stopPropagation(); }, true);
+            }
+        });
+        this.map.on('popupclose', () => { this._popupOpen = false; });
 
         this.map.on('contextmenu', e => {
-            // 如果 touchstart 已启动长按定时器，说明是移动端，仅暂存坐标，由定时器决定是否显示
+            if (this._popupOpen) return;
             if (this._longPressTimer) {
                 this._pendingContextLatLng = e.latlng;
                 return;
             }
-            // 桌面端右键：立即显示
             this._showContextMenu(e.latlng, e.originalEvent.clientX, e.originalEvent.clientY);
         });
 
         this.map.on('touchstart', e => {
             if (e.originalEvent.touches.length !== 1) return;
+            if (this._popupOpen) return;
             const touch = e.originalEvent.touches[0];
             this._ctxTouchPos = { x: touch.clientX, y: touch.clientY };
             this._longPressFired = false;

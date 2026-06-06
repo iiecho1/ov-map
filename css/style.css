@@ -807,12 +807,18 @@ body {
     min-width: 180px;
     max-width: calc(100vw - 60px);
     width: auto;
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
 }
 
 .leaflet-popup-content-wrapper {
     border-radius: 6px;
     box-shadow: 0 3px 14px rgba(0,0,0,0.3);
     max-width: calc(100vw - 40px);
+    -webkit-user-select: text;
+    user-select: text;
+    touch-action: manipulation;
 }
 
 .layer-popup .leaflet-popup-content-wrapper {
