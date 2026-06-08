@@ -1123,3 +1123,20 @@ body {
         width: 100%;
     }
 }
+
+.marker-delete-btn {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 3px 10px;
+    background: #e74c3c;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.marker-delete-btn:hover {
+    background: #c0392b;
+}

@@ -434,9 +434,18 @@ const App = {
             if (accuracy > 0) {
                 this.locateCircle = L.circle([lat, lng], { radius: accuracy, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.15, weight: 1 }).addTo(this.map);
             }
-            this.locateMarker = L.marker([lat, lng]).addTo(this.map)
-                .bindPopup(`${source}<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}${accuracy > 0 ? '<br>精度: ' + accuracy.toFixed(0) + ' 米' : ''}`)
-                .openPopup();
+            this.locateMarker = L.marker([lat, lng]).addTo(this.map);
+            const popupHtml = `${source}<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}${accuracy > 0 ? '<br>精度: ' + accuracy.toFixed(0) + ' 米' : ''}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
+            this.locateMarker.bindPopup(popupHtml);
+            this.locateMarker.on('popupopen', () => {
+                const btn = this.locateMarker.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+                if (btn) btn.addEventListener('click', () => {
+                    this.map.removeLayer(this.locateMarker);
+                    if (this.locateCircle) { this.map.removeLayer(this.locateCircle); this.locateCircle = null; }
+                    this.locateMarker = null;
+                });
+            });
+            this.locateMarker.openPopup();
             if (btn) btn.classList.remove('locating');
         };
 
@@ -536,9 +545,15 @@ const App = {
 
         this.map.setView([lat, lng], 16);
         if (this.coordMarker) this.map.removeLayer(this.coordMarker);
-        this.coordMarker = L.marker([lat, lng]).addTo(this.map)
-            .bindPopup(`坐标定位<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}`)
-            .openPopup();
+        const m = L.marker([lat, lng]).addTo(this.map);
+        const popupHtml = `坐标定位<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
+        m.bindPopup(popupHtml);
+        m.on('popupopen', () => {
+            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+        });
+        m.openPopup();
+        this.coordMarker = m;
         container.innerHTML = `<div class="search-result-item"><div class="result-name">经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}</div><div class="result-sub">已跳转到该位置</div></div>`;
         container.classList.add('has-items');
         this.closeSidebarOnMobile();
@@ -602,7 +617,14 @@ const App = {
     goToPlace(lat, lon, name) {
         this.map.setView([lat, lon], 16);
         if (this.searchMarker) this.map.removeLayer(this.searchMarker);
-        this.searchMarker = L.marker([lat, lon]).addTo(this.map).bindPopup(name).openPopup();
+        const m = L.marker([lat, lon]).addTo(this.map);
+        m.bindPopup(name + '<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>');
+        m.on('popupopen', () => {
+            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+        });
+        m.openPopup();
+        this.searchMarker = m;
         this._dom.searchResults.classList.remove('has-items');
         this.closeSidebarOnMobile();
     },
@@ -729,9 +751,15 @@ const App = {
         this.hideContextMenu();
         this.map.setView([ll.lat, ll.lng], 16);
         if (this.coordMarker) this.map.removeLayer(this.coordMarker);
-        this.coordMarker = L.marker([ll.lat, ll.lng]).addTo(this.map)
-            .bindPopup(`经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}`)
-            .openPopup();
+        const m = L.marker([ll.lat, ll.lng]).addTo(this.map);
+        const popupHtml = `经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
+        m.bindPopup(popupHtml);
+        m.on('popupopen', () => {
+            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+        });
+        m.openPopup();
+        this.coordMarker = m;
     },
 
     addMarkerFromCtx() {
@@ -740,8 +768,13 @@ const App = {
         this.hideContextMenu();
         const name = prompt('标记名称（可留空）:', '') || '';
         const m = L.marker([ll.lat, ll.lng]).addTo(this.map);
-        const popup = `${name ? '<b>' + this.escH(name) + '</b><br>' : ''}经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}`;
-        m.bindPopup(popup).openPopup();
+        const popup = `${name ? '<b>' + this.escH(name) + '</b><br>' : ''}经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
+        m.bindPopup(popup);
+        m.on('popupopen', () => {
+            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+        });
+        m.openPopup();
     },
 
     initEventListeners() {
