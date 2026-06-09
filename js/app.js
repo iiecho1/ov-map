@@ -162,17 +162,21 @@ L.GCJ02 = {
     }
 };
 
-L.GCJ02TileLayer = L.TileLayer.extend({
-    getTileUrl(coords) {
-        const z = coords.z;
-        const n = Math.pow(2, z);
-        const lng = (coords.x + 0.5) / n * 360 - 180;
-        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (coords.y + 0.5) / n))) * 180 / Math.PI;
-        const gcj = L.GCJ02.wgs84ToGcj02(lat, lng);
-        const gcjX = Math.floor((gcj.lng + 180) / 360 * n);
-        const gcjY = Math.floor((1 - Math.log(Math.tan(gcj.lat * Math.PI / 180) + 1 / Math.cos(gcj.lat * Math.PI / 180)) / Math.PI) / 2 * n);
-        return L.Util.template(this._url, L.extend({ s: this._getSubdomain(coords), x: gcjX, y: gcjY, z: z }, this.options));
+L.Projection.GCJ02Mercator = L.extend({}, L.Projection.SphericalMercator, {
+    project(latlng) {
+        const gcj = L.GCJ02.wgs84ToGcj02(latlng.lat, latlng.lng);
+        return L.Projection.SphericalMercator.project(new L.LatLng(gcj.lat, gcj.lng));
+    },
+    unproject(point) {
+        const gcjLatLng = L.Projection.SphericalMercator.unproject(point);
+        const wgs = L.GCJ02.gcj02ToWgs84(gcjLatLng.lat, gcjLatLng.lng);
+        return new L.LatLng(wgs.lat, wgs.lng);
     }
+});
+
+L.CRS.GCJ02 = L.extend({}, L.CRS.EPSG3857, {
+    code: 'EPSG:GCJ02',
+    projection: L.Projection.GCJ02Mercator
 });
 
 L.BingSatelliteLayer = L.TileLayer.extend({
@@ -350,8 +354,8 @@ const App = {
 
     initBaseLayers() {
         this.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 });
-        this.baseLayers.gaode = new L.GCJ02TileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德', maxZoom: 18 });
-        this.baseLayers.gaodeSatellite = new L.GCJ02TileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德卫星', maxZoom: 18 });
+        this.baseLayers.gaode = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德', maxZoom: 18 });
+        this.baseLayers.gaodeSatellite = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ['1','2','3','4'], attribution: '&copy; 高德卫星', maxZoom: 18 });
         this.baseLayers.bingSatellite = new L.BingSatelliteLayer();
         this.baseLayers.osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 });
         this.baseLayers.terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap', maxZoom: 17 });
@@ -835,6 +839,12 @@ const App = {
 
         this.map.on('contextmenu', e => {
             if (this._popupOpen) return;
+            if (this._rightDownPos) {
+                const dx = e.originalEvent.clientX - this._rightDownPos.x;
+                const dy = e.originalEvent.clientY - this._rightDownPos.y;
+                this._rightDownPos = null;
+                if (dx * dx + dy * dy > 25) return;
+            }
             if (this._longPressTimer) {
                 this._pendingContextLatLng = e.latlng;
                 return;
@@ -870,6 +880,11 @@ const App = {
             if (!this._longPressFired) {
                 this.hideContextMenu();
             }
+        });
+
+        this._rightDownPos = null;
+        this.map.on('mousedown', e => {
+            if (e.originalEvent.button === 2) this._rightDownPos = { x: e.originalEvent.clientX, y: e.originalEvent.clientY };
         });
 
         this._cursorLatest = null;
@@ -968,7 +983,19 @@ const App = {
         this.debouncedSave();
     },
 
-    switchBaseLayer(n) { if (this.currentBaseLayer) this.map.removeLayer(this.baseLayers[this.currentBaseLayer]); this.baseLayers[n].addTo(this.map); this.currentBaseLayer = n; },
+    switchBaseLayer(n) {
+        if (this.currentBaseLayer) this.map.removeLayer(this.baseLayers[this.currentBaseLayer]);
+        const isGCJ02 = (n === 'gaode' || n === 'gaodeSatellite');
+        const needSwitch = isGCJ02 ? (this.map.options.crs !== L.CRS.GCJ02) : (this.map.options.crs !== L.CRS.EPSG3857);
+        if (needSwitch) {
+            const center = this.map.getCenter();
+            const zoom = this.map.getZoom();
+            this.map.options.crs = isGCJ02 ? L.CRS.GCJ02 : L.CRS.EPSG3857;
+            this.map.setView(center, zoom, { reset: true });
+        }
+        this.baseLayers[n].addTo(this.map);
+        this.currentBaseLayer = n;
+    },
     triggerFileInput(a) { document.getElementById('fileInput').accept = a; document.getElementById('fileInput').click(); },
 
     kmlColorToRgba(c) {
