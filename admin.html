@@ -44,6 +44,22 @@
         <div class="admin-content">
             <div class="admin-section">
                 <div class="section-header">
+                    <h3>上传文件到云端</h3>
+                </div>
+                <div class="upload-area" id="cloudUploadArea">
+                    <div class="upload-icon">&#9729;</div>
+                    <p>拖拽 KML 文件到此处，或点击选择文件上传到云端</p>
+                    <input type="file" id="cloudKmlInput" accept=".kml" multiple style="display:none">
+                    <button class="btn btn-primary" onclick="document.getElementById('cloudKmlInput').click()">选择 KML 文件</button>
+                </div>
+                <div id="cloudUploadProgress" class="upload-progress" style="display:none">
+                    <div class="progress-bar"><div class="progress-fill" id="cloudProgressFill"></div></div>
+                    <span id="cloudProgressText">上传中...</span>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <div class="section-header">
                     <h3>文件管理</h3>
                     <div class="section-actions">
                         <span id="fileCount" class="file-count"></span>

@@ -264,6 +264,7 @@ const Admin = {
             this.showAdminPage();
         }
         this.initUploadArea();
+        this.initCloudUploadArea();
     },
 
     login(e) {
@@ -557,6 +558,88 @@ const Admin = {
         if (success > 0) {
             showToast(`成功上传 ${success} 个文件`, 'success');
             this.refreshList();
+        }
+    },
+
+    initCloudUploadArea() {
+        const area = document.getElementById('cloudUploadArea');
+        const input = document.getElementById('cloudKmlInput');
+        if (!area || !input) return;
+
+        area.addEventListener('click', e => {
+            if (e.target.tagName !== 'BUTTON') input.click();
+        });
+        area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
+        area.addEventListener('dragleave', () => { area.classList.remove('dragover'); });
+        area.addEventListener('drop', e => {
+            e.preventDefault();
+            area.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.kml'));
+            if (files.length) this.uploadCloudFiles(files);
+            else showToast('请上传 .kml 文件', 'error');
+        });
+        input.addEventListener('change', e => {
+            const files = Array.from(e.target.files);
+            if (files.length) this.uploadCloudFiles(files);
+            input.value = '';
+        });
+    },
+
+    async uploadCloudFiles(files) {
+        const apiUrl = getApiUrl();
+        if (!apiUrl) { showToast('请先在下方"文件管理"中填写后端地址并连接', 'error'); return; }
+
+        const progress = document.getElementById('cloudUploadProgress');
+        const progressFill = document.getElementById('cloudProgressFill');
+        const progressText = document.getElementById('cloudProgressText');
+        progress.style.display = 'flex';
+
+        let success = 0, completed = 0;
+        const totalFiles = files.length;
+        const fileBytes = Array.from(files).map(f => f.size);
+        const fileProgress = new Array(totalFiles).fill(0);
+        const totalBytes = fileBytes.reduce((s, b) => s + b, 0);
+
+        const updateOverallProgress = () => {
+            const uploadedBytes = fileProgress.reduce((s, p) => s + p, 0);
+            const pct = totalBytes > 0 ? Math.round((uploadedBytes / totalBytes) * 100) : Math.round((completed / totalFiles) * 100);
+            progressFill.style.width = pct + '%';
+            progressText.textContent = `${completed}/${totalFiles} 完成 (${pct}%)`;
+        };
+
+        const uploadOne = async (file, index) => {
+            try {
+                const text = await file.text();
+                const id = 'cloud_' + Date.now() + '_' + index;
+                const onProgress = (loaded, total) => { fileProgress[index] = loaded; updateOverallProgress(); };
+                await RemoteStorage.save({ id, name: file.name, text, ext: 'kml', size: file.size, enabled: true, createdAt: Date.now(), updatedAt: Date.now() }, onProgress);
+                success++;
+            } catch (err) {
+                console.error('云端上传失败:', file.name, err);
+                showToast(`云端上传失败: ${file.name}`, 'error');
+            } finally {
+                completed++;
+                fileProgress[index] = fileBytes[index];
+                updateOverallProgress();
+            }
+        };
+
+        const queue = Array.from(files).map((f, i) => () => uploadOne(f, i));
+        const workers = [];
+        for (let w = 0; w < Math.min(MAX_CONCURRENT, queue.length); w++) {
+            workers.push((async () => { while (queue.length) { const task = queue.shift(); if (task) await task(); } })());
+        }
+        await Promise.all(workers);
+
+        progressFill.style.width = '100%';
+        progressText.textContent = '完成';
+        setTimeout(() => { progress.style.display = 'none'; }, 1000);
+
+        if (success > 0) {
+            showToast(`成功上传 ${success} 个文件到云端`, 'success');
+            if (this._type === 'kml' && this._source === 'remote') {
+                this.refreshList();
+            }
         }
     },
 
