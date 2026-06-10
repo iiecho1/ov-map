@@ -44,9 +44,26 @@
         <div class="admin-content">
             <div class="admin-section">
                 <div class="section-header">
-                    <h3>上传 KML 文件</h3>
+                    <h3>文件管理</h3>
+                    <div class="section-actions">
+                        <span id="fileCount" class="file-count"></span>
+                        <button class="btn btn-small btn-primary" onclick="Admin.refreshList()">&#8635; 刷新</button>
+                    </div>
                 </div>
-                <div class="upload-area" id="uploadArea">
+                <div class="source-tabs" id="typeTabs">
+                    <button class="source-tab active" data-type="kml" onclick="Admin.switchType('kml')">KML 文件</button>
+                    <button class="source-tab" data-type="config" onclick="Admin.switchType('config')">图层配置</button>
+                </div>
+                <div class="source-tabs" id="sourceTabs">
+                    <button class="source-tab active" data-source="remote" onclick="Admin.switchSource('remote')">云端</button>
+                    <button class="source-tab" data-source="local" onclick="Admin.switchSource('local')">本地</button>
+                </div>
+                <div class="api-inline-bar" id="apiBar">
+                    <input type="text" id="remoteApiInput" placeholder="后端 API 地址，如 http://localhost:3000" />
+                    <button class="btn btn-small btn-primary" onclick="Admin.connectRemoteApi()">连接</button>
+                </div>
+                <div id="remoteApiStatus" class="api-inline-status"></div>
+                <div class="upload-area" id="uploadArea" style="display:none">
                     <div class="upload-icon">&#128228;</div>
                     <p>拖拽 KML 文件到此处，或点击选择文件</p>
                     <input type="file" id="kmlFileInput" accept=".kml" multiple style="display:none">
@@ -56,31 +73,7 @@
                     <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
                     <span id="progressText">上传中...</span>
                 </div>
-            </div>
-
-            <div class="admin-section">
-                <div class="section-header">
-                    <h3>KML 文件管理</h3>
-                    <div class="section-actions">
-                        <span id="fileCount" class="file-count"></span>
-                        <button class="btn btn-small btn-primary" onclick="Admin.refreshList()">&#8635; 刷新</button>
-                    </div>
-                </div>
-                <div class="source-tabs">
-                    <button class="source-tab active" data-source="remote" onclick="Admin.switchSource('remote')">云端数据</button>
-                    <button class="source-tab" data-source="local" onclick="Admin.switchSource('local')">浏览器数据</button>
-                </div>
-                <div class="source-content active" id="sourceRemote">
-                    <div class="api-inline-bar">
-                        <input type="text" id="remoteApiInput" placeholder="后端 API 地址，如 http://localhost:3000" />
-                        <button class="btn btn-small btn-primary" onclick="Admin.connectRemoteApi()">连接</button>
-                    </div>
-                    <div id="remoteApiStatus" class="api-inline-status"></div>
-                    <div id="remoteFileList" class="file-list"></div>
-                </div>
-                <div class="source-content" id="sourceLocal">
-                    <div id="localFileList" class="file-list"></div>
-                </div>
+                <div id="fileListContainer" class="file-list"></div>
             </div>
 
             <div class="admin-section">

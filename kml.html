@@ -482,10 +482,15 @@ input[type="range"] {
 
     <!-- 配置管理 -->
     <div class="card">
-      <div class="card-header">
+      <div class="card-header" onclick="toggleCard(this)">
         <span class="dot"></span> 配置管理
+        <span class="chevron">▼</span>
       </div>
       <div class="card-body">
+        <div class="row">
+          <label>后端地址</label>
+          <input type="text" id="configApiUrl" placeholder="如 http://localhost:3000，留空仅用浏览器" />
+        </div>
         <div class="row">
           <label>加载配置</label>
           <select id="savedConfigSelect"><option value="">-- 选择已保存配置 --</option></select>
@@ -497,11 +502,14 @@ input[type="range"] {
         <div class="row">
           <label>保存为</label>
           <input type="text" id="configNameInput" placeholder="输入配置名称" />
-          <button class="btn btn-sm btn-success" id="btnSaveConfig" style="flex:none">保存到浏览器</button>
+          <div class="btn-group" style="flex:none">
+            <button class="btn btn-sm btn-success" id="btnSaveConfig">浏览器</button>
+            <button class="btn btn-sm btn-primary" id="btnSaveConfigCloud">&#9729; 云端</button>
+          </div>
         </div>
         <div class="btn-group" style="justify-content:center">
-          <button class="btn btn-sm btn-warning" id="btnExportConfig">导出配置文件</button>
-          <button class="btn btn-sm btn-warning" id="btnImportConfig">导入配置文件</button>
+          <button class="btn btn-sm btn-warning" id="btnExportConfig">导出文件</button>
+          <button class="btn btn-sm btn-warning" id="btnImportConfig">导入文件</button>
         </div>
         <input type="file" id="configFileInput" accept=".json" style="display:none" />
       </div>
@@ -593,6 +601,14 @@ function loadSheet(sheetName) {
   populateColumnSelects();
   expandAzimuthRows();
   populateColumnList();
+  if (pendingConfig) {
+    applyCategoryConfig(pendingConfig);
+    if (pendingConfig.selectedCols) {
+      document.querySelectorAll('.col-check').forEach(cb => {
+        cb.checked = pendingConfig.selectedCols.includes(cb.dataset.col);
+      });
+    }
+  }
   const rowCount = currentSheetData.length, colCount = currentHeaders.length;
   $('fileInfo').textContent = '✅ ' + (sourceFileName || '数据') + ' — 读取 ' + rowCount + ' 行数据（不含表头），' + colCount + ' 列';
   $('statusLeft').textContent = '已加载 ' + rowCount + ' 行 × ' + colCount + ' 列';
@@ -930,17 +946,67 @@ $('btnExportConfig').addEventListener('click', exportConfig);
 $('btnImportConfig').addEventListener('click', () => $('configFileInput').click());
 $('configFileInput').addEventListener('change', importConfig);
 $('btnSaveConfig').addEventListener('click', saveConfigToStorage);
+$('btnSaveConfigCloud').addEventListener('click', saveConfigToCloud);
 $('btnLoadSaved').addEventListener('click', loadSavedConfig);
 $('btnDeleteSaved').addEventListener('click', deleteSavedConfig);
 
 const STORAGE_KEY = 'layerToolConfigs';
 function getSavedConfigs() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
 
-function refreshConfigSelect() {
+function getConfigApiUrl() {
+  return ($('configApiUrl').value.trim() || localStorage.getItem('ov-map-cloud-api') || '').replace(/\/+$/, '');
+}
+
+$('configApiUrl').addEventListener('change', () => {
+  const url = $('configApiUrl').value.trim();
+  if (url) localStorage.setItem('ov-map-cloud-api', url.replace(/\/+$/, ''));
+  refreshConfigSelect();
+});
+
+(function initConfigApi() {
+  const saved = localStorage.getItem('ov-map-cloud-api') || '';
+  if (saved) $('configApiUrl').value = saved;
+  refreshConfigSelect();
+})();
+
+async function refreshConfigSelect() {
   const sel = $('savedConfigSelect'), cur = sel.value;
   sel.innerHTML = '<option value="">-- 选择已保存配置 --</option>';
-  Object.keys(getSavedConfigs()).sort().forEach(n => { const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-  if (cur && getSavedConfigs()[cur]) sel.value = cur;
+
+  const localGroup = document.createElement('optgroup');
+  localGroup.label = '浏览器';
+  Object.keys(getSavedConfigs()).sort().forEach(n => {
+    const o = document.createElement('option');
+    o.value = 'local:' + n; o.textContent = n;
+    localGroup.appendChild(o);
+  });
+  sel.appendChild(localGroup);
+
+  const apiUrl = getConfigApiUrl();
+  if (apiUrl) {
+    try {
+      const resp = await fetch(apiUrl + '/api/configs', { signal: AbortSignal.timeout(3000) });
+      if (resp.ok) {
+        const configs = await resp.json();
+        if (configs.length) {
+          const cloudGroup = document.createElement('optgroup');
+          cloudGroup.label = '☁ 云端';
+          configs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).forEach(c => {
+            const o = document.createElement('option');
+            o.value = 'cloud:' + c.id;
+            o.textContent = '☁ ' + c.name;
+            cloudGroup.appendChild(o);
+          });
+          sel.appendChild(cloudGroup);
+        }
+      }
+    } catch {}
+  }
+
+  if (cur) {
+    const opts = [...sel.options];
+    if (opts.find(o => o.value === cur)) sel.value = cur;
+  }
 }
 
 function saveConfigToStorage() {
@@ -950,37 +1016,79 @@ function saveConfigToStorage() {
   if (configs[name] && !confirm(`配置 "${name}" 已存在，是否覆盖？`)) return;
   configs[name] = collectConfig();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
-  refreshConfigSelect(); $('savedConfigSelect').value = name; $('configNameInput').value = '';
-  $('statusLeft').textContent = '已保存配置: ' + name;
+  refreshConfigSelect(); $('savedConfigSelect').value = 'local:' + name; $('configNameInput').value = '';
+  $('statusLeft').textContent = '已保存配置到浏览器: ' + name;
 }
 
 function loadSavedConfig() {
-  const name = $('savedConfigSelect').value;
-  if (!name) { alert('请选择一个配置'); return; }
-  const configs = getSavedConfigs();
-  if (!configs[name]) { alert('配置不存在'); return; }
-  applyConfig(configs[name]); $('configNameInput').value = name;
-  $('statusLeft').textContent = '已加载配置: ' + name;
+  const val = $('savedConfigSelect').value;
+  if (!val) { alert('请选择一个配置'); return; }
+  if (val.startsWith('cloud:')) {
+    loadCloudConfig(val.slice(6));
+  } else {
+    const name = val.startsWith('local:') ? val.slice(6) : val;
+    const configs = getSavedConfigs();
+    if (!configs[name]) { alert('配置不存在'); return; }
+    applyConfig(configs[name]); $('configNameInput').value = name;
+    $('statusLeft').textContent = '已加载配置: ' + name;
+  }
+}
+
+async function loadCloudConfig(id) {
+  const apiUrl = getConfigApiUrl();
+  if (!apiUrl) { alert('请先填写后端地址'); return; }
+  try {
+    const resp = await fetch(apiUrl + '/api/configs/' + id, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const cfg = await resp.json();
+    const config = typeof cfg.text === 'string' ? JSON.parse(cfg.text) : cfg.text;
+    applyConfig(config);
+    $('configNameInput').value = cfg.name || '';
+    $('statusLeft').textContent = '已加载云端配置: ' + cfg.name;
+  } catch (e) {
+    alert('加载云端配置失败: ' + e.message);
+  }
 }
 
 function deleteSavedConfig() {
-  const name = $('savedConfigSelect').value;
-  if (!name) { alert('请选择一个配置'); return; }
-  if (!confirm(`确定删除配置 "${name}"？`)) return;
-  const configs = getSavedConfigs(); delete configs[name];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
-  refreshConfigSelect(); $('configNameInput').value = '';
-  $('statusLeft').textContent = '已删除配置: ' + name;
+  const val = $('savedConfigSelect').value;
+  if (!val) { alert('请选择一个配置'); return; }
+  if (val.startsWith('cloud:')) {
+    deleteCloudConfig(val.slice(6));
+  } else {
+    const name = val.startsWith('local:') ? val.slice(6) : val;
+    if (!confirm(`确定删除配置 "${name}"？`)) return;
+    const configs = getSavedConfigs(); delete configs[name];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+    refreshConfigSelect(); $('configNameInput').value = '';
+    $('statusLeft').textContent = '已删除配置: ' + name;
+  }
+}
+
+async function deleteCloudConfig(id) {
+  const apiUrl = getConfigApiUrl();
+  if (!apiUrl) { alert('请先填写后端地址'); return; }
+  if (!confirm('确定删除此云端配置？')) return;
+  try {
+    const resp = await fetch(apiUrl + '/api/configs/' + id, { method: 'DELETE', signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    refreshConfigSelect(); $('configNameInput').value = '';
+    $('statusLeft').textContent = '已删除云端配置';
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
 }
 
 refreshConfigSelect();
 
 function collectConfig() {
+  const selectedCols = [...document.querySelectorAll('.col-check:checked')].map(cb => cb.dataset.col);
   const config = {
-    version: 1,
+    version: 2,
     fieldMapping: { labelCol:$('labelCol').value, lngCol:$('lngCol').value, latCol:$('latCol').value, azimuthCol:$('azimuthCol').value },
     sectorStyle: { shape:$('defaultShape').value, angle:parseInt($('sectorAngle').value), radius:parseInt($('sectorRadius').value), fillColor:$('defaultFillColor').value, lineColor:$('defaultLineColor').value, showBorder:$('showBorder').checked },
-    category: { column:$('categoryCol').value, rows:[] }
+    category: { column:$('categoryCol').value, rows:[] },
+    selectedCols: selectedCols
   };
   document.querySelectorAll('#categoryStyles .cat-item').forEach(row => {
     const vs = row.querySelector('.cat-val-select');
@@ -1009,6 +1117,8 @@ function importConfig(e) {
   reader.readAsText(file); e.target.value = '';
 }
 
+let pendingConfig = null;
+
 function applyConfig(config) {
   if (config.fieldMapping && currentHeaders.length > 0) {
     const fm = config.fieldMapping;
@@ -1026,37 +1136,97 @@ function applyConfig(config) {
     if (s.lineColor) $('defaultLineColor').value = s.lineColor;
     if (s.showBorder !== undefined) $('showBorder').checked = s.showBorder;
   }
-  if (config.category) {
-    const catCol = $('categoryCol');
-    if (config.category.column && currentHeaders.includes(config.category.column)) {
-      catCol.value = config.category.column; onCategoryColChange();
-      if (config.category.rows && Array.isArray(config.category.rows)) {
-        const allVals = getCatFieldValues();
-        config.category.rows.forEach(rd => {
-          if (!allVals.includes(rd.value)) return;
-          const idx = catRowCount++;
-          const div = document.createElement('div');
-          div.className = 'cat-item'; div.dataset.idx = idx;
-          div.innerHTML = `
-            <select class="cat-val-select" data-idx="${idx}"><option value="${esc(rd.value)}">${esc(rd.value)}</option></select>
-            <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${rd.shape==='sector'?' selected':''}>扇形</option><option value="sword"${rd.shape==='sword'?' selected':''}>剑形</option><option value="triangle"${rd.shape==='triangle'?' selected':''}>三角形</option></select>
-            <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${rd.angle||40}" min="0" max="90" step="5" />
-            <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${rd.radius||80}" min="0" max="150" step="5" />
-            <span class="sep"></span>
-            <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${rd.fillColor||'#7c8cf8'}" />
-            <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="${rd.lineColor||'#f87171'}" />
-            <select class="cat-fill-style" data-idx="${idx}"><option value="solid"${rd.borderStyle==='solid'?' selected':''}>实线</option><option value="no-border"${rd.borderStyle==='no-border'?' selected':''}>无边框</option></select>
-            <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="${rd.opacity||90}" min="0" max="100" step="5" />
-            <button class="cat-del" data-idx="${idx}">×</button>`;
-          $('categoryStyles').appendChild(div);
-          div.querySelector('.cat-del').onclick = () => div.remove();
-        });
-      }
-    } else if (!config.category.column) { catCol.value = ''; onCategoryColChange(); }
+  if (config.selectedCols && currentHeaders.length > 0) {
+    document.querySelectorAll('.col-check').forEach(cb => {
+      cb.checked = config.selectedCols.includes(cb.dataset.col);
+    });
+  }
+  applyCategoryConfig(config);
+}
+
+function applyCategoryConfig(config) {
+  if (!config.category) return;
+  const catCol = $('categoryCol');
+  if (config.category.column && currentHeaders.includes(config.category.column)) {
+    catCol.value = config.category.column; onCategoryColChange();
+    if (config.category.rows && Array.isArray(config.category.rows)) {
+      const allVals = getCatFieldValues();
+      config.category.rows.forEach(rd => {
+        if (!allVals.includes(rd.value)) return;
+        const idx = catRowCount++;
+        const div = document.createElement('div');
+        div.className = 'cat-item'; div.dataset.idx = idx;
+        div.innerHTML = `
+          <select class="cat-val-select" data-idx="${idx}"><option value="${esc(rd.value)}">${esc(rd.value)}</option></select>
+          <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${rd.shape==='sector'?' selected':''}>扇形</option><option value="sword"${rd.shape==='sword'?' selected':''}>剑形</option><option value="triangle"${rd.shape==='triangle'?' selected':''}>三角形</option></select>
+          <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${rd.angle||40}" min="0" max="90" step="5" />
+          <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${rd.radius||80}" min="0" max="150" step="5" />
+          <span class="sep"></span>
+          <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${rd.fillColor||'#7c8cf8'}" />
+          <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="${rd.lineColor||'#f87171'}" />
+          <select class="cat-fill-style" data-idx="${idx}"><option value="solid"${rd.borderStyle==='solid'?' selected':''}>实线</option><option value="no-border"${rd.borderStyle==='no-border'?' selected':''}>无边框</option></select>
+          <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="${rd.opacity||90}" min="0" max="100" step="5" />
+          <button class="cat-del" data-idx="${idx}">×</button>`;
+        $('categoryStyles').appendChild(div);
+        div.querySelector('.cat-del').onclick = () => div.remove();
+      });
+    }
+    pendingConfig = null;
+  } else if (config.category.column && !currentHeaders.includes(config.category.column)) {
+    pendingConfig = config;
+  } else if (!config.category.column) {
+    catCol.value = ''; onCategoryColChange();
+    pendingConfig = null;
   }
 }
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function saveConfigToCloud() {
+  const configName = $('configNameInput').value.trim();
+  if (!configName) { alert('请输入配置名称'); return; }
+  const apiUrl = getConfigApiUrl();
+  if (!apiUrl) { alert('请先填写后端地址'); return; }
+
+  const overlay = $('loadingOverlay');
+  overlay.querySelector('.loading-text').textContent = '正在连接后端...';
+  overlay.classList.add('show');
+
+  try {
+    const resp = await fetch(apiUrl + '/api/health', { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data || data.status !== 'ok') throw new Error('服务状态异常');
+  } catch (e) {
+    overlay.classList.remove('show');
+    alert('无法连接后端: ' + e.message);
+    return;
+  }
+
+  overlay.querySelector('.loading-text').textContent = '正在上传配置...';
+  try {
+    const text = JSON.stringify(collectConfig(), null, 2);
+    const uploadResp = await compressedPost(apiUrl + '/api/configs', {
+      name: configName, text: text
+    }, (loaded, total) => {
+      const pct = Math.round((loaded / total) * 100);
+      overlay.querySelector('.loading-text').textContent = `正在上传配置... ${pct}%`;
+    });
+    overlay.classList.remove('show');
+    if (uploadResp.ok) {
+      $('statusLeft').textContent = '已同步配置到云端: ' + configName;
+      refreshConfigSelect();
+    } else {
+      let msg = 'HTTP ' + uploadResp.status;
+      const err = await uploadResp.json().catch(() => ({}));
+      if (err.error) msg = err.error;
+      alert('同步失败: ' + msg);
+    }
+  } catch (e) {
+    overlay.classList.remove('show');
+    alert('同步失败: ' + e.message);
+  }
+}
 
 const CLOUD_DB_NAME = 'ov-map-cloud';
 const CLOUD_DB_VERSION = 1;
