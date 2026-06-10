@@ -602,12 +602,7 @@ function loadSheet(sheetName) {
   expandAzimuthRows();
   populateColumnList();
   if (pendingConfig) {
-    applyCategoryConfig(pendingConfig);
-    if (pendingConfig.selectedCols) {
-      document.querySelectorAll('.col-check').forEach(cb => {
-        cb.checked = pendingConfig.selectedCols.includes(cb.dataset.col);
-      });
-    }
+    applyConfig(pendingConfig);
   }
   const rowCount = currentSheetData.length, colCount = currentHeaders.length;
   $('fileInfo').textContent = '✅ ' + (sourceFileName || '数据') + ' — 读取 ' + rowCount + ' 行数据（不含表头），' + colCount + ' 列';
@@ -1079,8 +1074,6 @@ async function deleteCloudConfig(id) {
   }
 }
 
-refreshConfigSelect();
-
 function collectConfig() {
   const selectedCols = [...document.querySelectorAll('.col-check:checked')].map(cb => cb.dataset.col);
   const config = {
@@ -1120,7 +1113,20 @@ function importConfig(e) {
 let pendingConfig = null;
 
 function applyConfig(config) {
-  if (config.fieldMapping && currentHeaders.length > 0) {
+  if (currentHeaders.length === 0) {
+    if (config.sectorStyle) {
+      const s = config.sectorStyle;
+      if (s.shape) $('defaultShape').value = s.shape;
+      if (s.angle !== undefined) { $('sectorAngle').value = s.angle; $('sectorAngleInput').value = s.angle; }
+      if (s.radius !== undefined) { $('sectorRadius').value = s.radius; $('sectorRadiusInput').value = s.radius; }
+      if (s.fillColor) $('defaultFillColor').value = s.fillColor;
+      if (s.lineColor) $('defaultLineColor').value = s.lineColor;
+      if (s.showBorder !== undefined) $('showBorder').checked = s.showBorder;
+    }
+    pendingConfig = config;
+    return;
+  }
+  if (config.fieldMapping) {
     const fm = config.fieldMapping;
     if (fm.labelCol && currentHeaders.includes(fm.labelCol)) $('labelCol').value = fm.labelCol;
     if (fm.lngCol && currentHeaders.includes(fm.lngCol)) $('lngCol').value = fm.lngCol;
@@ -1136,7 +1142,7 @@ function applyConfig(config) {
     if (s.lineColor) $('defaultLineColor').value = s.lineColor;
     if (s.showBorder !== undefined) $('showBorder').checked = s.showBorder;
   }
-  if (config.selectedCols && currentHeaders.length > 0) {
+  if (config.selectedCols) {
     document.querySelectorAll('.col-check').forEach(cb => {
       cb.checked = config.selectedCols.includes(cb.dataset.col);
     });
