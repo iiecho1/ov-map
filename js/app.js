@@ -215,6 +215,10 @@ const App = {
     _cacheDom() {
         const ids = ['searchInput', 'searchResults', 'apiKeyBox', 'apiKeyInput', 'cursorPos', 'zoomLevel', 'contextMenu', 'ctxCoord', 'fileInput', 'importedLayers', 'measureResults', 'loadingOverlay'];
         for (const id of ids) this._dom[id] = document.getElementById(id);
+        this._dom.sidebar = document.getElementById('sidebar');
+        this._dom.sidebarOverlay = document.getElementById('sidebarOverlay');
+        this._dom.sidebarBtn = document.querySelector('.sidebar-btn');
+        this._dom.sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn');
     },
 
     async init() {
@@ -251,6 +255,7 @@ const App = {
 
     initLabelOverlay() {
         const self = this;
+        const GRID_SIZE = 0.1;
         const Overlay = L.Layer.extend({
             onAdd(map) {
                 this._map = map;
@@ -283,7 +288,8 @@ const App = {
                 const size = map.getSize();
                 const dpr = window.devicePixelRatio || 1;
                 const cw = size.x * dpr, ch = size.y * dpr;
-                if (this._canvas.width !== cw || this._canvas.height !== ch) {
+                const canvasChanged = this._canvas.width !== cw || this._canvas.height !== ch;
+                if (canvasChanged) {
                     this._canvas.width = cw;
                     this._canvas.height = ch;
                     this._canvas.style.width = size.x + 'px';
@@ -309,16 +315,17 @@ const App = {
                 const latPad = (ne.lat - sw.lat) * 0.2, lngPad = (ne.lng - sw.lng) * 0.2;
                 const filterBounds = L.latLngBounds([sw.lat - latPad, sw.lng - lngPad], [ne.lat + latPad, ne.lng + lngPad]);
                 const pad = 100;
-
                 const items = App._getFlatLabelCache();
-                for (let k = 0; k < items.length; k++) {
-                    const item = items[k];
-                    if (!filterBounds.contains(item._c)) continue;
+                const grid = App._getLabelSpatialIndex(items, GRID_SIZE, filterBounds);
+                ctx.beginPath();
+                for (let k = 0; k < grid.length; k++) {
+                    const item = grid[k];
                     const pt = map.latLngToContainerPoint(item._c);
                     if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
                     ctx.strokeText(item.text, pt.x, pt.y);
                     ctx.fillText(item.text, pt.x, pt.y);
                 }
+                ctx.stroke();
             }
         });
         this.labelOverlay = new Overlay();
@@ -340,6 +347,7 @@ const App = {
             const cache = data._labelCache;
             for (let i = 0; i < cache.length; i++) {
                 const item = cache[i];
+                if (!item.text) continue;
                 if (!item._c) {
                     if (item.type === 'point') item._c = item.latlng;
                     else if (item.bounds) item._c = item.bounds.getCenter();
@@ -350,6 +358,24 @@ const App = {
         }
         this._flatLabelCache = flat;
         return flat;
+    },
+
+    _getLabelSpatialIndex(items, gridSize, filterBounds) {
+        if (!filterBounds) return items;
+        const sw = filterBounds.getSouthWest(), ne = filterBounds.getNorthEast();
+        const minLat = Math.floor(sw.lat / gridSize) * gridSize;
+        const maxLat = Math.ceil(ne.lat / gridSize) * gridSize;
+        const minLng = Math.floor(sw.lng / gridSize) * gridSize;
+        const maxLng = Math.ceil(ne.lng / gridSize) * gridSize;
+        const result = [];
+        for (let k = 0; k < items.length; k++) {
+            const item = items[k];
+            if (!item._c) continue;
+            const lat = item._c.lat, lng = item._c.lng;
+            if (lat < minLat || lat > maxLat || lng < minLng || lng > maxLng) continue;
+            result.push(item);
+        }
+        return result;
     },
 
     initBaseLayers() {
@@ -433,8 +459,8 @@ const App = {
 
         const placeMarker = (lat, lng, accuracy, source) => {
             this.map.setView([lat, lng], 16);
-            if (this.locateMarker) this.map.removeLayer(this.locateMarker);
-            if (this.locateCircle) this.map.removeLayer(this.locateCircle);
+            if (this.locateMarker && this.map.hasLayer(this.locateMarker)) this.map.removeLayer(this.locateMarker);
+            if (this.locateCircle && this.map.hasLayer(this.locateCircle)) this.map.removeLayer(this.locateCircle);
             if (accuracy > 0) {
                 this.locateCircle = L.circle([lat, lng], { radius: accuracy, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.15, weight: 1 }).addTo(this.map);
             }
@@ -444,8 +470,8 @@ const App = {
             this.locateMarker.on('popupopen', () => {
                 const btn = this.locateMarker.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
                 if (btn) btn.addEventListener('click', () => {
-                    this.map.removeLayer(this.locateMarker);
-                    if (this.locateCircle) { this.map.removeLayer(this.locateCircle); this.locateCircle = null; }
+                    if (this.locateMarker && this.map.hasLayer(this.locateMarker)) this.map.removeLayer(this.locateMarker);
+                    if (this.locateCircle && this.map.hasLayer(this.locateCircle)) { this.map.removeLayer(this.locateCircle); this.locateCircle = null; }
                     this.locateMarker = null;
                 });
             });
@@ -548,13 +574,13 @@ const App = {
         }
 
         this.map.setView([lat, lng], 16);
-        if (this.coordMarker) this.map.removeLayer(this.coordMarker);
+        if (this.coordMarker && this.map.hasLayer(this.coordMarker)) this.map.removeLayer(this.coordMarker);
         const m = L.marker([lat, lng]).addTo(this.map);
         const popupHtml = `坐标定位<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
         m.bindPopup(popupHtml);
         m.on('popupopen', () => {
             const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
         });
         m.openPopup();
         this.coordMarker = m;
@@ -598,10 +624,18 @@ const App = {
         container.classList.add('has-items');
         try {
             const c = this.map.getCenter();
-            const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`, { signal }).then(r => r.json()).catch(() => null);
-            if (signal.aborted) return;
-            const cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
-            const cityName = cityResp?.regeocode?.addressComponent?.city || '';
+            const centerKey = `${Math.round(c.lat * 100)}_${Math.round(c.lng * 100)}`;
+            let cityCode = '', cityName = '';
+            if (this._geocodeCache && this._geocodeCache.key === centerKey) {
+                cityCode = this._geocodeCache.cityCode;
+                cityName = this._geocodeCache.cityName;
+            } else {
+                const cityResp = await fetch(`https://restapi.amap.com/v3/geocode/regeo?key=${this._gaodeKey}&location=${c.lng},${c.lat}&extensions=base`, { signal }).then(r => r.json()).catch(() => null);
+                if (signal.aborted) return;
+                cityCode = cityResp?.regeocode?.addressComponent?.citycode || '';
+                cityName = cityResp?.regeocode?.addressComponent?.city || '';
+                this._geocodeCache = { key: centerKey, cityCode, cityName };
+            }
             let url = `https://restapi.amap.com/v3/place/text?key=${this._gaodeKey}&keywords=${encodeURIComponent(query)}&offset=10&extensions=all`;
             if (cityCode) url += `&city=${cityCode}&citylimit=true`;
             const results = await fetch(url, { signal }).then(r => r.json());
@@ -620,12 +654,12 @@ const App = {
 
     goToPlace(lat, lon, name) {
         this.map.setView([lat, lon], 16);
-        if (this.searchMarker) this.map.removeLayer(this.searchMarker);
+        if (this.searchMarker && this.map.hasLayer(this.searchMarker)) this.map.removeLayer(this.searchMarker);
         const m = L.marker([lat, lon]).addTo(this.map);
         m.bindPopup(name + '<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>');
         m.on('popupopen', () => {
             const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
         });
         m.openPopup();
         this.searchMarker = m;
@@ -640,9 +674,20 @@ const App = {
         for (const [layerId, data] of Object.entries(this.importedLayers)) {
             if (!data._searchIndex) this._buildSearchIndex(layerId);
             const ln = data.name;
-            for (const item of data._searchIndex) {
-                if (item.text.includes(q)) {
+            const index = data._searchIndex;
+            const inverted = data._searchInverted;
+            if (inverted && inverted.has(q)) {
+                const hits = inverted.get(q);
+                for (let i = 0; i < hits.length; i++) {
+                    const item = index[hits[i]];
                     matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                }
+            } else {
+                for (let i = 0; i < index.length; i++) {
+                    const item = index[i];
+                    if (item.text.includes(q)) {
+                        matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                    }
                 }
             }
         }
@@ -676,19 +721,32 @@ const App = {
         const data = this.importedLayers[layerId];
         if (!data) return;
         const index = [];
+        const inverted = new Map();
         const skip = new Set(['_kmlStyle', '_styleUrl', '_kmlDescription', 'styleUrl', 'styleHash']);
         data.layer.eachLayer(sub => {
             const f = sub.feature;
             if (!f?.properties) return;
             const name = f.properties.name || '';
             let combined = name.toLowerCase();
+            const tokens = new Set();
+            if (name) tokens.add(name.toLowerCase());
             for (const [k, v] of Object.entries(f.properties)) {
                 if (skip.has(k) || k.startsWith('_') || k === 'name') continue;
-                if (v) combined += '\x00' + String(v).toLowerCase();
+                if (v) {
+                    const vs = String(v).toLowerCase();
+                    combined += '\x00' + vs;
+                    if (vs.length <= 50) tokens.add(vs);
+                }
             }
+            const idx = index.length;
             index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), text: combined });
+            for (const token of tokens) {
+                if (!inverted.has(token)) inverted.set(token, []);
+                inverted.get(token).push(idx);
+            }
         });
         data._searchIndex = index;
+        data._searchInverted = inverted;
     },
 
     escH(s) { return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') : ''; },
@@ -754,13 +812,13 @@ const App = {
         const ll = this._ctxLatLng;
         this.hideContextMenu();
         this.map.setView([ll.lat, ll.lng], 16);
-        if (this.coordMarker) this.map.removeLayer(this.coordMarker);
+        if (this.coordMarker && this.map.hasLayer(this.coordMarker)) this.map.removeLayer(this.coordMarker);
         const m = L.marker([ll.lat, ll.lng]).addTo(this.map);
         const popupHtml = `经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
         m.bindPopup(popupHtml);
         m.on('popupopen', () => {
             const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
+            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
         });
         m.openPopup();
         this.coordMarker = m;
@@ -800,21 +858,24 @@ const App = {
             this.hideContextMenu();
         });
 
-        document.getElementById('sidebar').addEventListener('click', e => {
+        (this._dom.sidebar || document.getElementById('sidebar')).addEventListener('click', e => {
             if (e.target.closest('.layer-actions') || e.target.closest('.layer-item-name') || e.target.type === 'checkbox') return;
             if (e.target.closest('.layer-item') || e.target.closest('.search-result-item') || e.target.closest('.btn')) {
                 this.closeSidebarOnMobile();
             }
         });
 
+        let resizeTimer = null;
         window.addEventListener('resize', () => {
-            if (!this._isMobile()) {
-                document.getElementById('sidebar').classList.remove('open');
-                document.getElementById('sidebarOverlay').classList.remove('show');
-                const btn = document.querySelector('.sidebar-btn');
-                if (btn) btn.classList.remove('active');
-            }
-            this.map.invalidateSize();
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (!this._isMobile()) {
+                    if (this._dom.sidebar) this._dom.sidebar.classList.remove('open');
+                    if (this._dom.sidebarOverlay) this._dom.sidebarOverlay.classList.remove('show');
+                    if (this._dom.sidebarBtn) this._dom.sidebarBtn.classList.remove('active');
+                }
+                this.map.invalidateSize();
+            }, 300);
         });
         document.addEventListener('contextmenu', e => { if (e.target.closest('#map')) e.preventDefault(); });
 
@@ -828,7 +889,8 @@ const App = {
         this.map.on('popupopen', e => {
             this._popupOpen = true;
             const wrapper = e.popup.getElement();
-            if (wrapper) {
+            if (wrapper && !wrapper._stopPropBound) {
+                wrapper._stopPropBound = true;
                 wrapper.addEventListener('contextmenu', ev => { ev.stopPropagation(); }, true);
                 wrapper.addEventListener('touchstart', ev => { ev.stopPropagation(); }, true);
                 wrapper.addEventListener('touchmove', ev => { ev.stopPropagation(); }, true);
@@ -984,10 +1046,15 @@ const App = {
     },
 
     switchBaseLayer(n) {
-        if (this.currentBaseLayer) this.map.removeLayer(this.baseLayers[this.currentBaseLayer]);
+        if (!this.baseLayers[n]) return;
+        if (this.currentBaseLayer) {
+            if (this.map.hasLayer(this.baseLayers[this.currentBaseLayer])) {
+                this.map.removeLayer(this.baseLayers[this.currentBaseLayer]);
+            }
+        }
         const isGCJ02 = (n === 'gaode' || n === 'gaodeSatellite');
-        const needSwitch = isGCJ02 ? (this.map.options.crs !== L.CRS.GCJ02) : (this.map.options.crs !== L.CRS.EPSG3857);
-        if (needSwitch) {
+        const currentIsGCJ02 = this.map.options.crs === L.CRS.GCJ02;
+        if (isGCJ02 !== currentIsGCJ02) {
             const center = this.map.getCenter();
             const zoom = this.map.getZoom();
             this.map.options.crs = isGCJ02 ? L.CRS.GCJ02 : L.CRS.EPSG3857;
@@ -1191,14 +1258,6 @@ const App = {
                 if (layer) {
                     layer._popupFeature = f;
                     layer._layerName = fileName;
-                    layer.on('click', function () {
-                        if (!this._popupBound) {
-                            this._popupBound = true;
-                            const html = App.getPopup(this._popupFeature, this._layerName);
-                            if (html) this.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
-                            this.openPopup();
-                        }
-                    });
                     group.addLayer(layer);
                 }
             }
@@ -1213,6 +1272,17 @@ const App = {
         }
 
         group.addTo(this.map);
+        const groupFileName = fileName;
+        group.on('click', function(e) {
+            const layer = e.layer;
+            if (layer._popupBound) return;
+            layer._popupBound = true;
+            const html = App.getPopup(layer._popupFeature, layer._layerName || groupFileName);
+            if (html) {
+                layer.bindPopup(html, { className: 'layer-popup', maxHeight: Math.min(window.innerHeight - 120, 400) });
+                layer.openPopup();
+            }
+        });
         this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
         return group;
     },
@@ -1235,7 +1305,7 @@ const App = {
             const text = await file.text();
             const layerId = Date.now();
             const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
-            if (!layer) { this.hideLoading(); this._importing = false; return; }
+            if (!layer) return;
             if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
             this.showLoading('保存...');
             await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci });
@@ -1243,8 +1313,8 @@ const App = {
             this.debouncedSave();
             this.updateLabelOverlay();
         } catch (err) { alert('导入失败: ' + err.message); console.error(err); }
+        finally { this._importing = false; }
         this.hideLoading();
-        this._importing = false;
         event.target.value = '';
     },
 
@@ -1264,22 +1334,34 @@ const App = {
         const orderSet = new Set(this._layerOrder);
         for (const id of ids) { if (!orderSet.has(id)) this._layerOrder.push(id); }
 
-        c.innerHTML = this._layerOrder.map((id, i) => {
+        const fragment = document.createDocumentFragment();
+        const orderLen = this._layerOrder.length;
+        for (let i = 0; i < orderLen; i++) {
+            const id = this._layerOrder[i];
             const d = this.importedLayers[id];
-            if (!d) return '';
-            return `<div class="layer-item" draggable="true" data-id="${id}">
-                <input type="checkbox" ${d.visible !== false ? 'checked' : ''} onchange="App.toggleLayer('${id}',this.checked)">
+            if (!d) continue;
+            const div = document.createElement('div');
+            div.className = 'layer-item';
+            div.draggable = true;
+            div.dataset.id = id;
+            const cloudIcon = d._cloud ? '&#9729; ' : '';
+            const checkedAttr = d.visible !== false ? 'checked' : '';
+            const moveUpDisabled = i === 0 ? 'disabled' : '';
+            const moveDownDisabled = i === orderLen - 1 ? 'disabled' : '';
+            div.innerHTML = `<input type="checkbox" ${checkedAttr} onchange="App.toggleLayer('${id}',this.checked)">
                 <span class="layer-color-indicator" style="background:${d.color}"></span>
                 <div class="layer-item-info">
-                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${d._cloud ? '&#9729; ' : ''}${this.escH(d.name)}</span>
+                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${cloudIcon}${this.escH(d.name)}</span>
                     <div class="layer-actions">
-                        <button title="上移" onclick="App.moveLayer('${id}',-1)" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
-                        <button title="下移" onclick="App.moveLayer('${id}',1)" ${i === this._layerOrder.length - 1 ? 'disabled' : ''}>&#9660;</button>
+                        <button title="上移" onclick="App.moveLayer('${id}',-1)" ${moveUpDisabled}>&#9650;</button>
+                        <button title="下移" onclick="App.moveLayer('${id}',1)" ${moveDownDisabled}>&#9660;</button>
                         <button title="删除" onclick="App.removeLayer('${id}')" style="color:#e74c3c">&#10005;</button>
                     </div>
-                </div>
-            </div>`;
-        }).join('');
+                </div>`;
+            fragment.appendChild(div);
+        }
+        c.innerHTML = '';
+        c.appendChild(fragment);
         this._bindLayerDrag();
     },
 
@@ -1449,39 +1531,27 @@ const App = {
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
     },
 
-    toggleLayer(id, vis) {
+    async toggleLayer(id, vis) {
         const d = this.importedLayers[id];
         if (d) {
             d.visible = vis;
-            if (vis) this.map.addLayer(d.layer);
-            else this.map.removeLayer(d.layer);
+            if (vis && !this.map.hasLayer(d.layer)) this.map.addLayer(d.layer);
+            else if (!vis && this.map.hasLayer(d.layer)) this.map.removeLayer(d.layer);
             this.updateLabelOverlay();
-            if (Storage.db) {
-                const tx = Storage.db.transaction(STORE_LAYERS, 'readwrite');
-                const store = tx.objectStore(STORE_LAYERS);
-                const req = store.get(String(id));
-                req.onsuccess = () => {
-                    const saved = req.result;
-                    if (saved) { saved.visible = vis; store.put(saved); }
-                };
-                const nid = Number(id);
-                if (!isNaN(nid)) {
-                    const req2 = store.get(nid);
-                    req2.onsuccess = () => {
-                        const saved = req2.result;
-                        if (saved) { saved.visible = vis; store.put(saved); }
-                    };
-                }
-            }
+            try {
+                const saved = await Storage.getLayer(id);
+                if (saved) await Storage.saveLayer(id, { ...saved, visible: vis });
+            } catch (e) { console.error('toggleLayer save failed:', id, e); }
         }
     },
 
     async removeLayer(id) {
         const d = this.importedLayers[id];
         if (d) {
-            this.map.removeLayer(d.layer);
+            if (this.map.hasLayer(d.layer)) this.map.removeLayer(d.layer);
             delete this.importedLayers[id];
             this._layerOrder = (this._layerOrder || []).filter(x => String(x) !== String(id));
+            this._flatLabelCache = null;
             await Storage.removeLayer(id);
             this.updateImportedLayersList();
             this.updateLabelOverlay();
@@ -1497,18 +1567,14 @@ const App = {
             for (let i = 1; i < ll.length; i++) d += ll[i-1].distanceTo(ll[i]);
             label = '线段';
             let angleHtml = '';
-            if (ll.length >= 2) {
-                const bearing = this.calcBearing(ll[0], ll[ll.length - 1]);
-                const dir = this.bearingDir(bearing);
-                angleHtml = `<div class="value">方位角: ${bearing.toFixed(1)}° (${dir})</div>`;
-            }
-            body = `<div class="value">长度: ${this.fmtD(d)}</div>${angleHtml}`;
             let popupAngle = '';
             if (ll.length >= 2) {
                 const bearing = this.calcBearing(ll[0], ll[ll.length - 1]);
                 const dir = this.bearingDir(bearing);
+                angleHtml = `<div class="value">方位角: ${bearing.toFixed(1)}° (${dir})</div>`;
                 popupAngle = `<br>方位角: <strong>${bearing.toFixed(1)}°</strong> (${dir})`;
             }
+            body = `<div class="value">长度: ${this.fmtD(d)}</div>${angleHtml}`;
             popupHtml = `<div class="popup-title">📏 ${label}</div><div class="popup-body">长度: <strong>${this.fmtD(d)}</strong>${popupAngle}</div>`;
         } else if (type === 'polygon' || type === 'rectangle') {
             const ll = layer.getLatLngs()[0];
@@ -1713,9 +1779,9 @@ const App = {
     },
 
     toggleSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-        const btn = document.querySelector('.sidebar-btn');
+        const sidebar = this._dom.sidebar || document.getElementById('sidebar');
+        const overlay = this._dom.sidebarOverlay || document.getElementById('sidebarOverlay');
+        const btn = this._dom.sidebarBtn || document.querySelector('.sidebar-btn');
         sidebar.classList.toggle('open');
         overlay.classList.toggle('show');
         if (btn) btn.classList.toggle('active');
@@ -1723,8 +1789,8 @@ const App = {
     },
 
     toggleSidebarCollapse() {
-        const sidebar = document.getElementById('sidebar');
-        const collapseBtn = document.getElementById('sidebarCollapseBtn');
+        const sidebar = this._dom.sidebar || document.getElementById('sidebar');
+        const collapseBtn = this._dom.sidebarCollapseBtn || document.getElementById('sidebarCollapseBtn');
         sidebar.classList.toggle('collapsed');
         const isCollapsed = sidebar.classList.contains('collapsed');
         collapseBtn.innerHTML = isCollapsed ? '&#10095;' : '&#10094;';
@@ -1734,9 +1800,11 @@ const App = {
 
     closeSidebarOnMobile() {
         if (this._isMobile()) {
-            document.getElementById('sidebar').classList.remove('open');
-            document.getElementById('sidebarOverlay').classList.remove('show');
-            const btn = document.querySelector('.sidebar-btn');
+            const sidebar = this._dom.sidebar || document.getElementById('sidebar');
+            const overlay = this._dom.sidebarOverlay || document.getElementById('sidebarOverlay');
+            const btn = this._dom.sidebarBtn || document.querySelector('.sidebar-btn');
+            sidebar.classList.remove('open');
+            overlay.classList.remove('show');
             if (btn) btn.classList.remove('active');
         }
     },
