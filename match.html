@@ -588,6 +588,37 @@ function formatDist(m) {
   return (m / 1000).toFixed(2) + ' km';
 }
 
+const GRID_DEG = 0.01;
+
+function buildSpatialGrid(points) {
+  const grid = new Map();
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const gx = Math.floor(p.lng / GRID_DEG);
+    const gy = Math.floor(p.lat / GRID_DEG);
+    const key = gx + ',' + gy;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(p);
+  }
+  return grid;
+}
+
+function getNeighbors(grid, lat, lng) {
+  const gx = Math.floor(lng / GRID_DEG);
+  const gy = Math.floor(lat / GRID_DEG);
+  const result = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = (gx + dx) + ',' + (gy + dy);
+      const cell = grid.get(key);
+      if (cell) {
+        for (let i = 0; i < cell.length; i++) result.push(cell[i]);
+      }
+    }
+  }
+  return result;
+}
+
 $('btnMatch').addEventListener('click', () => {
   const nameCol1 = $('nameCol1').value;
   const lngCol1 = $('lngCol1').value;
@@ -615,6 +646,8 @@ $('btnMatch').addEventListener('click', () => {
       }
     });
 
+    const grid = buildSpatialGrid(parsed2);
+
     matchResults = [];
     let errCount = 0;
 
@@ -624,8 +657,9 @@ $('btnMatch').addEventListener('click', () => {
       if (isNaN(lng) || isNaN(lat)) { errCount++; return; }
 
       const sourceName = String(row[nameCol1] || '');
+      const candidates = getNeighbors(grid, lat, lng);
 
-      const distances = parsed2.map(p => ({
+      const distances = candidates.map(p => ({
         name: p.name,
         dist: haversine(lat, lng, p.lat, p.lng),
       }));

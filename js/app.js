@@ -8,6 +8,7 @@ const CLOUD_STORE = 'kml-files';
 
 const CloudReader = {
     db: null,
+    _initError: false,
     async init() {
         return new Promise(resolve => {
             const req = indexedDB.open(CLOUD_DB_NAME, CLOUD_DB_VERSION);
@@ -16,7 +17,7 @@ const CloudReader = {
                 if (!db.objectStoreNames.contains(CLOUD_STORE)) db.createObjectStore(CLOUD_STORE, { keyPath: 'id' });
             };
             req.onsuccess = e => { this.db = e.target.result; resolve(); };
-            req.onerror = () => resolve();
+            req.onerror = () => { this._initError = true; console.warn('CloudReader: IndexedDB unavailable'); resolve(); };
         });
     },
     async getEnabledFiles() {
@@ -48,6 +49,7 @@ const CloudReader = {
 
 const Storage = {
     db: null,
+    _initError: false,
     async init() {
         return new Promise(resolve => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -57,7 +59,7 @@ const Storage = {
                 if (!db.objectStoreNames.contains(STORE_STATE)) db.createObjectStore(STORE_STATE, { keyPath: 'key' });
             };
             req.onsuccess = e => { this.db = e.target.result; resolve(); };
-            req.onerror = () => resolve();
+            req.onerror = () => { this._initError = true; console.warn('Storage: IndexedDB unavailable'); resolve(); };
         });
     },
     saveLayer(id, data) {
@@ -237,6 +239,9 @@ const App = {
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
+            if (Storage._initError || CloudReader._initError) {
+                console.warn('Storage warning: Local persistence may be unavailable');
+            }
         } catch (e) {
             console.error('Init failed:', e);
         }
@@ -464,18 +469,13 @@ const App = {
             if (accuracy > 0) {
                 this.locateCircle = L.circle([lat, lng], { radius: accuracy, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.15, weight: 1 }).addTo(this.map);
             }
-            this.locateMarker = L.marker([lat, lng]).addTo(this.map);
             const popupHtml = `${source}<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}${accuracy > 0 ? '<br>精度: ' + accuracy.toFixed(0) + ' 米' : ''}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
-            this.locateMarker.bindPopup(popupHtml);
-            this.locateMarker.on('popupopen', () => {
-                const btn = this.locateMarker.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-                if (btn) btn.addEventListener('click', () => {
-                    if (this.locateMarker && this.map.hasLayer(this.locateMarker)) this.map.removeLayer(this.locateMarker);
+            this.locateMarker = this.createMarkerWithPopup([lat, lng], popupHtml, {
+                onDelete: () => {
                     if (this.locateCircle && this.map.hasLayer(this.locateCircle)) { this.map.removeLayer(this.locateCircle); this.locateCircle = null; }
                     this.locateMarker = null;
-                });
+                }
             });
-            this.locateMarker.openPopup();
             if (btn) btn.classList.remove('locating');
         };
 
@@ -575,15 +575,8 @@ const App = {
 
         this.map.setView([lat, lng], 16);
         if (this.coordMarker && this.map.hasLayer(this.coordMarker)) this.map.removeLayer(this.coordMarker);
-        const m = L.marker([lat, lng]).addTo(this.map);
         const popupHtml = `坐标定位<br>经度: ${lng.toFixed(6)}<br>纬度: ${lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
-        m.bindPopup(popupHtml);
-        m.on('popupopen', () => {
-            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
-        });
-        m.openPopup();
-        this.coordMarker = m;
+        this.coordMarker = this.createMarkerWithPopup([lat, lng], popupHtml);
         container.innerHTML = `<div class="search-result-item"><div class="result-name">经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}</div><div class="result-sub">已跳转到该位置</div></div>`;
         container.classList.add('has-items');
         this.closeSidebarOnMobile();
@@ -655,14 +648,8 @@ const App = {
     goToPlace(lat, lon, name) {
         this.map.setView([lat, lon], 16);
         if (this.searchMarker && this.map.hasLayer(this.searchMarker)) this.map.removeLayer(this.searchMarker);
-        const m = L.marker([lat, lon]).addTo(this.map);
-        m.bindPopup(name + '<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>');
-        m.on('popupopen', () => {
-            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
-        });
-        m.openPopup();
-        this.searchMarker = m;
+        const popupHtml = name + '<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>';
+        this.searchMarker = this.createMarkerWithPopup([lat, lon], popupHtml);
         this._dom.searchResults.classList.remove('has-items');
         this.closeSidebarOnMobile();
     },
@@ -715,6 +702,20 @@ const App = {
     getCenter(sub, f) {
         if (f.geometry?.type === 'Point') { const c = f.geometry.coordinates; return [c[1], c[0]]; }
         return sub.getBounds?.().isValid?.() ? sub.getBounds().getCenter() : null;
+    },
+
+    createMarkerWithPopup(latlng, popupHtml, options = {}) {
+        const marker = L.marker(latlng).addTo(this.map);
+        marker.bindPopup(popupHtml);
+        marker.on('popupopen', () => {
+            const btn = marker.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
+            if (btn) btn.addEventListener('click', () => {
+                if (this.map.hasLayer(marker)) this.map.removeLayer(marker);
+                if (options.onDelete) options.onDelete();
+            });
+        });
+        marker.openPopup();
+        return marker;
     },
 
     _buildSearchIndex(layerId) {
@@ -813,15 +814,8 @@ const App = {
         this.hideContextMenu();
         this.map.setView([ll.lat, ll.lng], 16);
         if (this.coordMarker && this.map.hasLayer(this.coordMarker)) this.map.removeLayer(this.coordMarker);
-        const m = L.marker([ll.lat, ll.lng]).addTo(this.map);
         const popupHtml = `经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
-        m.bindPopup(popupHtml);
-        m.on('popupopen', () => {
-            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { if (this.map.hasLayer(m)) this.map.removeLayer(m); });
-        });
-        m.openPopup();
-        this.coordMarker = m;
+        this.coordMarker = this.createMarkerWithPopup([ll.lat, ll.lng], popupHtml);
     },
 
     addMarkerFromCtx() {
@@ -829,14 +823,8 @@ const App = {
         const ll = this._ctxLatLng;
         this.hideContextMenu();
         const name = prompt('标记名称（可留空）:', '') || '';
-        const m = L.marker([ll.lat, ll.lng]).addTo(this.map);
-        const popup = `${name ? '<b>' + this.escH(name) + '</b><br>' : ''}经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
-        m.bindPopup(popup);
-        m.on('popupopen', () => {
-            const btn = m.getPopup().getElement()?.querySelector('[data-action="delete-marker"]');
-            if (btn) btn.addEventListener('click', () => { this.map.removeLayer(m); });
-        });
-        m.openPopup();
+        const popupHtml = `${name ? '<b>' + this.escH(name) + '</b><br>' : ''}经度: ${ll.lng.toFixed(6)}<br>纬度: ${ll.lat.toFixed(6)}<br><button class="marker-delete-btn" data-action="delete-marker">删除标记</button>`;
+        this.createMarkerWithPopup([ll.lat, ll.lng], popupHtml);
     },
 
     initEventListeners() {
@@ -1523,6 +1511,8 @@ const App = {
         const finish = async () => {
             const newName = input.value.trim() || d.name;
             d.name = newName;
+            d._searchIndex = null;
+            d._searchInverted = null;
             el.textContent = newName;
             const saved = await Storage.getLayer(id);
             if (saved) await Storage.saveLayer(id, { ...saved, name: d.name });
@@ -1552,6 +1542,8 @@ const App = {
             delete this.importedLayers[id];
             this._layerOrder = (this._layerOrder || []).filter(x => String(x) !== String(id));
             this._flatLabelCache = null;
+            if (d._searchIndex) d._searchIndex = null;
+            if (d._searchInverted) d._searchInverted = null;
             await Storage.removeLayer(id);
             this.updateImportedLayersList();
             this.updateLabelOverlay();

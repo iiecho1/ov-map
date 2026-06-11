@@ -754,43 +754,64 @@ function hexToKmlColor(hex, opacity) {
   return Math.round(opacity * 2.55).toString(16).padStart(2,'0') + b.toString(16).padStart(2,'0') + g.toString(16).padStart(2,'0') + r.toString(16).padStart(2,'0');
 }
 
-function makeSectorPoints(lat, lng, azimuth, halfAngle, radius, steps, shape) {
-  if (shape === 'sword') return makeSwordPoints(lat, lng, azimuth, halfAngle, radius, steps);
-  if (shape === 'triangle') return makeTrianglePoints(lat, lng, azimuth, halfAngle, radius);
-  const points = [[lat, lng]];
-  for (let i = 0; i <= steps; i++) {
-    const a = (azimuth - halfAngle + (2 * halfAngle * i / steps)) * Math.PI / 180;
-    points.push([lat + (radius/111320)*Math.cos(a), lng + (radius/(111320*Math.cos(lat*Math.PI/180)))*Math.sin(a)]);
+const _sectorCache = new Map();
+
+function _makeSectorOffsets(azimuth, halfAngle, radius, steps, shape) {
+  const key = `${shape}:${azimuth}:${halfAngle}:${radius}:${steps}`;
+  if (_sectorCache.has(key)) return _sectorCache.get(key);
+  let offsets;
+  if (shape === 'sword') {
+    const toDLat = r => r / 111320;
+    const midAngle = azimuth * Math.PI / 180;
+    const arcRadius = Math.max(radius - 10, radius * 0.75);
+    const leftAngle = (azimuth + halfAngle) * Math.PI / 180;
+    const rightAngle = (azimuth - halfAngle) * Math.PI / 180;
+    offsets = [
+      [0, 0],
+      [toDLat(arcRadius)*Math.cos(leftAngle), toDLat(arcRadius)*Math.sin(leftAngle) / Math.cos(0)],
+      [toDLat(radius)*Math.cos(midAngle), toDLat(radius)*Math.sin(midAngle) / Math.cos(0)],
+      [toDLat(arcRadius)*Math.cos(rightAngle), toDLat(arcRadius)*Math.sin(rightAngle) / Math.cos(0)],
+      [0, 0]
+    ];
+  } else if (shape === 'triangle') {
+    const toDLat = r => r / 111320;
+    const l = (azimuth - halfAngle) * Math.PI / 180;
+    const m = azimuth * Math.PI / 180;
+    const ri = (azimuth + halfAngle) * Math.PI / 180;
+    offsets = [
+      [0, 0],
+      [toDLat(radius)*Math.cos(l), toDLat(radius)*Math.sin(l) / Math.cos(0)],
+      [toDLat(radius)*Math.cos(m), toDLat(radius)*Math.sin(m) / Math.cos(0)],
+      [toDLat(radius)*Math.cos(ri), toDLat(radius)*Math.sin(ri) / Math.cos(0)],
+      [0, 0]
+    ];
+  } else {
+    offsets = [[0, 0]];
+    for (let i = 0; i <= steps; i++) {
+      const a = (azimuth - halfAngle + (2 * halfAngle * i / steps)) * Math.PI / 180;
+      offsets.push([(radius/111320)*Math.cos(a), (radius/(111320))*Math.sin(a)]);
+    }
+    offsets.push([0, 0]);
   }
-  points.push([lat, lng]);
-  return points;
+  if (_sectorCache.size > 500) _sectorCache.clear();
+  _sectorCache.set(key, offsets);
+  return offsets;
+}
+
+function makeSectorPoints(lat, lng, azimuth, halfAngle, radius, steps, shape) {
+  const offsets = _makeSectorOffsets(azimuth, halfAngle, radius, steps, shape);
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  const latFactor = 1;
+  const lngFactor = 1 / (cosLat || 0.001);
+  return offsets.map(([dLat, dLng]) => [lat + dLat * latFactor, lng + dLng * lngFactor]);
 }
 
 function makeSwordPoints(lat, lng, azimuth, halfAngle, radius, steps) {
-  const cosLat = Math.cos(lat * Math.PI / 180);
-  const toDLat = r => r / 111320;
-  const toDLng = r => r / (111320 * cosLat);
-  const midAngle = azimuth * Math.PI / 180;
-  const arcRadius = Math.max(radius - 10, radius * 0.75);
-  const leftAngle = (azimuth + halfAngle) * Math.PI / 180;
-  const rightAngle = (azimuth - halfAngle) * Math.PI / 180;
-  return [
-    [lat, lng],
-    [lat + toDLat(arcRadius)*Math.cos(leftAngle), lng + toDLng(arcRadius)*Math.sin(leftAngle)],
-    [lat + toDLat(radius)*Math.cos(midAngle), lng + toDLng(radius)*Math.sin(midAngle)],
-    [lat + toDLat(arcRadius)*Math.cos(rightAngle), lng + toDLng(arcRadius)*Math.sin(rightAngle)],
-    [lat, lng]
-  ];
+  return makeSectorPoints(lat, lng, azimuth, halfAngle, radius, steps, 'sword');
 }
 
 function makeTrianglePoints(lat, lng, azimuth, halfAngle, radius) {
-  const cosLat = Math.cos(lat * Math.PI / 180);
-  const toDLat = r => r / 111320;
-  const toDLng = r => r / (111320 * cosLat);
-  const l = (azimuth - halfAngle) * Math.PI / 180;
-  const m = azimuth * Math.PI / 180;
-  const ri = (azimuth + halfAngle) * Math.PI / 180;
-  return [[lat,lng],[lat+toDLat(radius)*Math.cos(l),lng+toDLng(radius)*Math.sin(l)],[lat+toDLat(radius)*Math.cos(m),lng+toDLng(radius)*Math.sin(m)],[lat+toDLat(radius)*Math.cos(ri),lng+toDLng(radius)*Math.sin(ri)],[lat,lng]];
+  return makeSectorPoints(lat, lng, azimuth, halfAngle, radius, 0, 'triangle');
 }
 
 $('btnGenerate').addEventListener('click', () => {
