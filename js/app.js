@@ -210,7 +210,7 @@ const App = {
     importedLayers: {}, drawnItems: null, drawControl: null,
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
     colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [], _flatLabelCache: null,
-    _cursorRaf: null, _cursorLatest: null, _layerListRaf: null,
+    _cursorRaf: null, _cursorLatest: null, _layerListRaf: null, _allLayersHidden: false, _savedLayerVisibility: {},
     _dom: {},
     _popupLru: null,
 
@@ -1533,6 +1533,42 @@ const App = {
                 if (saved) await Storage.saveLayer(id, { ...saved, visible: vis });
             } catch (e) { console.error('toggleLayer save failed:', id, e); }
         }
+    },
+
+    toggleAllLayers() {
+        const btn = document.getElementById('toggleAllLayersBtn');
+        if (!this._allLayersHidden) {
+            this._savedLayerVisibility = {};
+            for (const [id, d] of Object.entries(this.importedLayers)) {
+                this._savedLayerVisibility[id] = d.visible !== false;
+                if (this.map.hasLayer(d.layer)) this.map.removeLayer(d.layer);
+                d.visible = false;
+            }
+            this._allLayersHidden = true;
+            if (btn) {
+                btn.innerHTML = '&#128064; 恢复显示';
+                btn.title = '恢复显示隐藏前的图层';
+            }
+        } else {
+            for (const [id, d] of Object.entries(this.importedLayers)) {
+                if (this._savedLayerVisibility[id] && !this.map.hasLayer(d.layer)) {
+                    this.map.addLayer(d.layer);
+                    d.visible = true;
+                } else if (!this._savedLayerVisibility[id] && this.map.hasLayer(d.layer)) {
+                    this.map.removeLayer(d.layer);
+                    d.visible = false;
+                }
+            }
+            this._allLayersHidden = false;
+            this._savedLayerVisibility = {};
+            if (btn) {
+                btn.innerHTML = '&#128065; 隐藏全部';
+                btn.title = '隐藏/显示全部图层';
+            }
+        }
+        this._flatLabelCache = null;
+        this.updateImportedLayersList();
+        this.updateLabelOverlay();
     },
 
     async removeLayer(id) {

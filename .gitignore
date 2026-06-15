@@ -3,3 +3,5 @@ dist/
 .DS_Store
 .mimocode
 .kilo
+GUIDE.md
+.gitignore

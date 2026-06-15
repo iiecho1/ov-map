@@ -72,7 +72,9 @@
                 <input type="file" id="fileInput" accept=".kml,.geojson,.json,.gpx" style="display:none">
             </div>
             <div class="layer-section">
-                <h4>已导入图层</h4>
+                <h4>已导入图层
+                    <button class="btn-cloud-sync" id="toggleAllLayersBtn" onclick="App.toggleAllLayers()" title="隐藏/显示全部图层">&#128065; 隐藏全部</button>
+                </h4>
                 <div id="importedLayers" class="layer-list"></div>
             </div>
             <div class="layer-section">
