@@ -1,375 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>图层工具</title>
+<title>图层工具 · OV Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<style>
-:root {
-  --bg: #0f0f1a;
-  --surface: #1a1a2e;
-  --surface2: #222240;
-  --border: #2a2a4a;
-  --text: #d4d4e8;
-  --text-muted: #8888aa;
-  --text-dim: #5c5c7a;
-  --accent: #7c8cf8;
-  --accent-hover: #9aa8ff;
-  --success: #4ade80;
-  --success-hover: #6ee7a0;
-  --danger: #f87171;
-  --danger-hover: #fca5a5;
-  --warning: #fbbf24;
-  --warning-hover: #fcd34d;
-  --radius: 10px;
-  --radius-sm: 6px;
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: "Inter", "Noto Sans SC", "Microsoft YaHei", -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.app {
-  width: 100%;
-  max-width: 900px;
-  background: var(--surface);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 0 0 1px var(--border), 0 20px 60px rgba(0,0,0,.5);
-}
-
-.header {
-  background: linear-gradient(135deg, #1e1e3a 0%, #1a1a2e 100%);
-  padding: 18px 28px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.header .logo {
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, var(--accent), #c084fc);
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  color: #fff;
-  font-weight: bold;
-}
-
-.header h1 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
-.header .ver { font-size: 10px; color: var(--text-dim); margin-left: auto; }
-
-.content { padding: 24px 28px; display: flex; flex-direction: column; gap: 20px; }
-
-.card {
-  background: var(--surface2);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  transition: border-color .2s;
-}
-
-.card-header {
-  padding: 10px 16px;
-  background: rgba(0,0,0,.15);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  letter-spacing: .2px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.card-header .dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.card-header .chevron {
-  margin-left: auto;
-  font-size: 10px;
-  transition: transform .25s;
-  color: var(--text-dim);
-}
-.card-header .chevron.collapsed { transform: rotate(-90deg); }
-
-.card-body {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Form rows */
-.row { display: flex; align-items: center; gap: 10px; }
-.row label { min-width: 52px; font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
-.row > * + * { flex: 1; }
-
-.row-row { display: flex; align-items: center; gap: 12px; }
-
-input[type="text"], input[type="number"], select {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  outline: none;
-  transition: border-color .2s, box-shadow .2s;
-  font-family: inherit;
-}
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(124,140,248,.12);
-}
-select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238888aa' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
-select option { background: var(--surface); }
-
-input[type="color"] {
-  width: 36px; height: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  background: none;
-  padding: 2px;
-}
-input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-input[type="color"]::-webkit-color-swatch { border-radius: 3px; border: none; }
-
-input[type="range"] {
-  flex: 1;
-  accent-color: var(--accent);
-  height: 4px;
-  cursor: pointer;
-}
-
-/* File upload */
-.file-zone {
-  position: relative;
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 28px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all .25s;
-  background: rgba(124,140,248,.03);
-}
-.file-zone:hover {
-  border-color: var(--accent);
-  background: rgba(124,140,248,.07);
-}
-.file-zone input[type="file"] {
-  position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 1;
-}
-.file-zone .icon { font-size: 32px; display: block; margin-bottom: 6px; opacity: .8; pointer-events: none; }
-.file-zone .hint { font-size: 12px; color: var(--text-muted); pointer-events: none; }
-.file-zone .hint strong { color: var(--accent); }
-
-/* Buttons */
-.btn {
-  padding: 7px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .1px;
-  transition: all .2s;
-  font-family: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.btn:active { transform: scale(.97); }
-
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-hover); }
-
-.btn-success { background: #166534; color: #bbf7d0; }
-.btn-success:hover { background: #15803d; }
-
-.btn-danger { background: #7f1d1d; color: #fecaca; }
-.btn-danger:hover { background: #991b1b; }
-
-.btn-warning { background: #451a03; color: #fde68a; }
-.btn-warning:hover { background: #78350f; }
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-}
-.btn-ghost:hover { background: var(--surface2); color: var(--text); }
-
-.btn-sm { padding: 4px 10px; font-size: 11px; }
-.btn-xs { padding: 2px 8px; font-size: 10px; }
-
-.btn-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-
-/* Tags / chips */
-.tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 20px;
-  font-size: 10px;
-  font-weight: 500;
-  background: rgba(124,140,248,.15);
-  color: var(--accent);
-}
-
-/* Columns checklist */
-.column-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 6px;
-  max-height: 180px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.column-grid::-webkit-scrollbar { width: 4px; }
-.column-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.column-chip {
-  display: flex; align-items: center; gap: 6px;
-  padding: 5px 8px;
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background .15s;
-}
-.column-chip:hover { background: rgba(124,140,248,.08); }
-.column-chip input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
-.column-chip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Category rows */
-.cat-list { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 4px; }
-.cat-list::-webkit-scrollbar { width: 4px; }
-.cat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.cat-item {
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  transition: border-color .15s;
-}
-.cat-item:hover { border-color: var(--accent); }
-
-.cat-item select { width: auto; min-width: 80px; }
-.cat-item input[type="number"] { width: 54px; padding-right: 4px; }
-.cat-item label { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
-.cat-item .sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
-
-.cat-del {
-  background: none; border: none;
-  color: var(--danger);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 0 4px;
-  line-height: 1;
-  opacity: .6;
-  transition: opacity .15s;
-}
-.cat-del:hover { opacity: 1; }
-
-/* Status bar */
-.status-bar {
-  padding: 10px 28px;
-  background: rgba(0,0,0,.2);
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-dim);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.status-bar .separator { flex: 1; }
-.status-bar .dot-status {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--success);
-  animation: pulse 2s infinite;
-}
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-
-/* Loading */
-.loading-overlay {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(15,15,26,.85);
-  z-index: 9999;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-.loading-overlay.show { display: flex; }
-.spinner {
-  width: 40px; height: 40px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin .7s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 13px; color: var(--text-muted); }
-
-/* Error list */
-.error-item {
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  background: rgba(248,113,113,.08);
-  border: 1px solid rgba(248,113,113,.15);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  color: var(--text);
-  font-family: "JetBrains Mono", "Consolas", monospace;
-  word-break: break-all;
-}
-.error-item .err-row { color: var(--accent); font-weight: 600; }
-.error-item .err-field { color: var(--warning); }
-.error-item .err-val { color: var(--danger); }
-.error-item .err-reason { color: var(--text-dim); font-style: italic; }
-
-/* Misc */
-.file-info { margin-top: 4px; font-size: 11px; color: var(--accent); font-weight: 500; }
-
-.full-width { width: 100%; }
-.text-center { text-align: center; }
-.mt-2 { margin-top: 8px; }
-.mt-3 { margin-top: 12px; }
-
-/* Responsive */
-@media (max-width: 640px) {
-  body { padding: 12px; }
-  .app { border-radius: 12px; }
-  .content { padding: 16px 14px; gap: 14px; }
-  .card-body { padding: 12px; }
-}
-</style>
+<link rel="stylesheet" href="css/kml.css">
 </head>
 <body>
 <div class="app">
@@ -464,7 +103,7 @@ input[type="range"] {
       <div class="card-body text-center" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-success" id="btnGenerate" style="padding:10px 32px;font-size:14px">生成 KML</button>
         <button class="btn btn-primary" id="btnExport" style="padding:10px 32px;font-size:14px">导出 KML</button>
-        <button class="btn btn-warning" id="btnSyncCloud" style="padding:10px 24px;font-size:14px">&#9729; 同步</button>
+        <button class="btn btn-warn" id="btnSyncCloud" style="padding:10px 24px;font-size:14px">&#9729; 同步</button>
       </div>
     </div>
 
@@ -508,8 +147,8 @@ input[type="range"] {
           </div>
         </div>
         <div class="btn-group" style="justify-content:center">
-          <button class="btn btn-sm btn-warning" id="btnExportConfig">导出文件</button>
-          <button class="btn btn-sm btn-warning" id="btnImportConfig">导入文件</button>
+          <button class="btn btn-sm btn-warn" id="btnExportConfig">导出文件</button>
+          <button class="btn btn-sm btn-warn" id="btnImportConfig">导入文件</button>
         </div>
         <input type="file" id="configFileInput" accept=".json" style="display:none" />
       </div>
@@ -528,6 +167,11 @@ input[type="range"] {
 
 </div>
 
+<button class="page-theme-toggle" onclick="toggleTheme()" title="切换明暗主题">
+  <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+  <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+<script src="js/utils.js"></script>
 <script>
 let workbook = null;
 let originalSheetData = [];
@@ -537,7 +181,6 @@ let sourceFileName = '';
 let lastKmlData = null;
 
 const DEFAULT_COLORS = ['#ffff80','#00ff00','#8000ff','#ff0080','#00ffff','#ff8000','#80ff00','#0080ff','#ff0000','#00ff80'];
-const $ = id => document.getElementById(id);
 
 function toggleCard(headerEl) {
   const body = headerEl.parentElement.querySelector('.card-body');
@@ -1206,8 +849,6 @@ function applyCategoryConfig(config) {
     pendingConfig = null;
   }
 }
-
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 async function saveConfigToCloud() {
   const configName = $('configNameInput').value.trim();

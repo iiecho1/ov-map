@@ -432,7 +432,7 @@ const App = {
             options: { position: 'topleft' },
             onAdd() {
                 const btn = L.DomUtil.create('div', 'locate-btn');
-                btn.innerHTML = '&#9737;';
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>';
                 btn.title = '定位到当前位置';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', () => App.locate());
@@ -447,7 +447,7 @@ const App = {
             options: { position: 'topleft' },
             onAdd() {
                 const btn = L.DomUtil.create('div', 'sidebar-btn');
-                btn.innerHTML = '&#9776;';
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
                 btn.title = '切换菜单';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.disableScrollPropagation(btn);

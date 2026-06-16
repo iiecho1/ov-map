@@ -1,0 +1,229 @@
+/* ========================================
+   Theme System — based on test.html design
+   ======================================== */
+
+:root {
+  /* --- Light Theme (default) --- */
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface-alt: #f8f9fa;
+  --sidebar-bg: #ffffff;
+  --sidebar-header: #f8f9fa;
+  --hover: #e9ecef;
+  --active: #e0f2fe;
+  --input-bg: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.45);
+
+  --border: #e2e8f0;
+  --border-focus: #0ea5e9;
+  --border-accent: #0ea5e9;
+
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-accent: #0284c7;
+  --text-on-accent: #ffffff;
+
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --accent-subtle: rgba(14, 165, 233, 0.08);
+  --accent-border: rgba(14, 165, 233, 0.3);
+
+  --success: #16a34a;
+  --success-subtle: rgba(22, 163, 74, 0.08);
+  --success-border: rgba(22, 163, 74, 0.3);
+
+  --danger: #dc2626;
+  --danger-subtle: rgba(220, 38, 38, 0.08);
+  --danger-border: rgba(220, 38, 38, 0.3);
+
+  --warning: #d97706;
+  --warning-subtle: rgba(217, 119, 6, 0.08);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.1);
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+
+  /* Popup */
+  --popup-bg: #ffffff;
+  --popup-text: #0f172a;
+  --popup-border: #e2e8f0;
+  --popup-row-even: #f8fafc;
+  --popup-row-hover: #f0f9ff;
+  --popup-key: #0f172a;
+  --popup-val: #475569;
+
+  /* Context menu */
+  --ctx-bg: #ffffff;
+  --ctx-header: #f8f9fa;
+  --ctx-text: #0f172a;
+  --ctx-border: #e2e8f0;
+  --ctx-hover: #f0f9ff;
+
+  /* Coordinates */
+  --coord-bg: rgba(255, 255, 255, 0.92);
+  --coord-text: #0f172a;
+  --coord-border: rgba(0, 0, 0, 0.06);
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-hover: rgba(0, 0, 0, 0.25);
+
+  /* Tooltip */
+  --tooltip-bg: rgba(15, 23, 42, 0.9);
+  --tooltip-text: #ffffff;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #0b0f19;
+  --surface: #131825;
+  --surface-alt: #1a2035;
+  --sidebar-bg: #131825;
+  --sidebar-header: #0e1220;
+  --hover: #1e2a42;
+  --active: rgba(14, 165, 233, 0.12);
+  --input-bg: #0e1220;
+  --overlay: rgba(0, 0, 0, 0.65);
+
+  --border: #1e2a42;
+  --border-focus: #0ea5e9;
+  --border-accent: #0ea5e9;
+
+  --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-accent: #38bdf8;
+  --text-on-accent: #ffffff;
+
+  --accent: #0ea5e9;
+  --accent-hover: #38bdf8;
+  --accent-subtle: rgba(14, 165, 233, 0.1);
+  --accent-border: rgba(14, 165, 233, 0.35);
+
+  --success: #22c55e;
+  --success-subtle: rgba(34, 197, 94, 0.1);
+  --success-border: rgba(34, 197, 94, 0.35);
+
+  --danger: #ef4444;
+  --danger-subtle: rgba(239, 68, 68, 0.1);
+  --danger-border: rgba(239, 68, 68, 0.35);
+
+  --warning: #f59e0b;
+  --warning-subtle: rgba(245, 158, 11, 0.1);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  --popup-bg: #131825;
+  --popup-text: #e2e8f0;
+  --popup-border: #1e2a42;
+  --popup-row-even: #0e1220;
+  --popup-row-hover: rgba(14, 165, 233, 0.06);
+  --popup-key: #e2e8f0;
+  --popup-val: #94a3b8;
+
+  --ctx-bg: #131825;
+  --ctx-header: #0e1220;
+  --ctx-text: #e2e8f0;
+  --ctx-border: #1e2a42;
+  --ctx-hover: rgba(14, 165, 233, 0.08);
+
+  --coord-bg: rgba(19, 24, 37, 0.92);
+  --coord-text: #e2e8f0;
+  --coord-border: rgba(255, 255, 255, 0.06);
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-hover: rgba(255, 255, 255, 0.2);
+
+  --tooltip-bg: rgba(11, 15, 25, 0.92);
+  --tooltip-text: #e2e8f0;
+
+  color-scheme: dark;
+}
+
+/* Smooth transitions */
+body,
+#sidebar,
+.sidebar-header,
+.search-box,
+.layer-section,
+.layer-item,
+.search-result-item,
+.modal,
+.modal-header,
+.modal-body,
+.modal-footer,
+.context-menu,
+.context-title,
+.context-coord,
+.context-actions button,
+#coordinates,
+.api-key-box,
+.cloud-file-item,
+.cloud-tab,
+.cloud-api-bar input,
+.search-input-wrap input,
+.search-mode-btn,
+.btn,
+.loading-spinner {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+
+/* ── Shared Reset ─────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ── Shared Animations ────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Page Theme Toggle (standalone pages) ── */
+.page-theme-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 10000;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  transition: all 0.2s;
+}
+
+.page-theme-toggle svg {
+  stroke: currentColor;
+  fill: none;
+}
+
+.page-theme-toggle:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+
+.page-theme-toggle .icon-sun,
+.page-theme-toggle .icon-moon {
+  transition: opacity 0.2s;
+}
+
+[data-theme="light"] .page-theme-toggle .icon-sun { display: none; }
+[data-theme="dark"] .page-theme-toggle .icon-moon { display: none; }
