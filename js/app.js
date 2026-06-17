@@ -667,37 +667,40 @@ const App = {
         const container = this._dom.searchResults;
         const q = query.toLowerCase();
         const scope = this.searchScope;
-        const matches = [];
-        for (const [layerId, data] of Object.entries(this.importedLayers)) {
-            if (!data._searchIndex) this._buildSearchIndex(layerId);
-            const ln = data.name;
-            const index = data._searchIndex;
+        container.innerHTML = '<div class="search-hint"><div class="search-spinner"></div> 搜索中...</div>';
+        container.classList.add('has-items');
+        setTimeout(() => {
+            const matches = [];
+            for (const [layerId, data] of Object.entries(this.importedLayers)) {
+                if (!data._searchIndex) this._buildSearchIndex(layerId);
+                const ln = data.name;
+                const index = data._searchIndex;
 
-            const checkName = (item) => item.nameText.includes(q);
-            const checkDesc = (item) => item.descText.includes(q);
-            const checkAll = (item) => item.nameText.includes(q) || item.descText.includes(q);
-            const checkItem = scope === 'name' ? checkName : scope === 'desc' ? checkDesc : checkAll;
+                const checkName = (item) => item.nameText.includes(q);
+                const checkDesc = (item) => item.descText.includes(q);
+                const checkAll = (item) => item.nameText.includes(q) || item.descText.includes(q);
+                const checkItem = scope === 'name' ? checkName : scope === 'desc' ? checkDesc : checkAll;
 
-            const inverted = scope === 'name' ? data._nameInverted : scope === 'desc' ? data._descInverted : null;
-            if (inverted && inverted.has(q)) {
-                const hits = inverted.get(q);
-                for (let i = 0; i < hits.length; i++) {
-                    const item = index[hits[i]];
-                    matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
-                }
-            } else {
-                for (let i = 0; i < index.length; i++) {
-                    const item = index[i];
-                    if (checkItem(item)) {
+                const inverted = scope === 'name' ? data._nameInverted : scope === 'desc' ? data._descInverted : null;
+                if (inverted && inverted.has(q)) {
+                    const hits = inverted.get(q);
+                    for (let i = 0; i < hits.length; i++) {
+                        const item = index[hits[i]];
                         matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                    }
+                } else {
+                    for (let i = 0; i < index.length; i++) {
+                        const item = index[i];
+                        if (checkItem(item)) {
+                            matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                        }
                     }
                 }
             }
-        }
-        if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; container.classList.add('has-items'); return; }
-        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
-        container.classList.add('has-items');
-        this._lastSearch = matches;
+            if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; return; }
+            container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
+            this._lastSearch = matches;
+        }, 0);
     },
 
     goToLayer(i) {
