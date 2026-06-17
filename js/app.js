@@ -527,6 +527,7 @@ const App = {
         input.value = '';
         this._dom.searchResults.classList.remove('has-items');
         this._dom.searchResults.innerHTML = '';
+        this._searchScrollBound = false;
     },
 
     setSearchScope(scope) {
@@ -698,9 +699,67 @@ const App = {
                 }
             }
             if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; return; }
-            container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
             this._lastSearch = matches;
+            this._searchDisplayCount = 0;
+            this._loadMoreResults();
         }, 0);
+    },
+
+    _loadMoreResults() {
+        const container = this._dom.searchResults;
+        const matches = this._lastSearch;
+        const PAGE_SIZE = 50;
+        const start = this._searchDisplayCount;
+        const end = Math.min(start + PAGE_SIZE, matches.length);
+        const hasMore = end < matches.length;
+
+        if (start === 0) {
+            container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + 
+                this._renderSearchResults(start, end) +
+                (hasMore ? '<div class="search-load-more"><div class="search-spinner"></div> 加载更多...</div>' : '');
+        } else {
+            const loadMoreEl = container.querySelector('.search-load-more');
+            if (loadMoreEl) loadMoreEl.remove();
+            container.insertAdjacentHTML('beforeend', 
+                this._renderSearchResults(start, end) +
+                (hasMore ? '<div class="search-load-more"><div class="search-spinner"></div> 加载更多...</div>' : '')
+            );
+        }
+        this._searchDisplayCount = end;
+
+        if (hasMore && start === 0) {
+            this._bindSearchScroll();
+        }
+    },
+
+    _renderSearchResults(start, end) {
+        const matches = this._lastSearch;
+        let html = '';
+        for (let i = start; i < end; i++) {
+            const m = matches[i];
+            html += `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`;
+        }
+        return html;
+    },
+
+    _bindSearchScroll() {
+        const container = this._dom.searchResults;
+        if (this._searchScrollBound) return;
+        this._searchScrollBound = true;
+        container.addEventListener('scroll', () => {
+            if (this._searchLoadingMore) return;
+            const loadMoreEl = container.querySelector('.search-load-more');
+            if (!loadMoreEl) return;
+            const rect = loadMoreEl.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            if (rect.top <= containerRect.bottom + 50) {
+                this._searchLoadingMore = true;
+                setTimeout(() => {
+                    this._loadMoreResults();
+                    this._searchLoadingMore = false;
+                }, 100);
+            }
+        }, { passive: true });
     },
 
     goToLayer(i) {
