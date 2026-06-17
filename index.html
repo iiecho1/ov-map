@@ -47,6 +47,11 @@
                 <button class="search-mode-btn" data-mode="layer" onclick="App.setSearchMode('layer')">图层</button>
                 <button class="search-mode-btn" data-mode="coord" onclick="App.setSearchMode('coord')">坐标</button>
             </div>
+            <div id="searchScopeWrap" class="search-scope-toggle" style="display:none">
+                <button class="search-scope-btn active" data-scope="all" onclick="App.setSearchScope('all')">全部</button>
+                <button class="search-scope-btn" data-scope="name" onclick="App.setSearchScope('name')">标签名</button>
+                <button class="search-scope-btn" data-scope="desc" onclick="App.setSearchScope('desc')">备注</button>
+            </div>
             <div class="search-input-wrap">
                 <input type="text" id="searchInput" placeholder="搜索地点..." autocomplete="off">
                 <button id="searchBtn" class="search-btn primary" onclick="App.doSearch()" title="搜索">

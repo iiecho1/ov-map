@@ -514,17 +514,26 @@ const App = {
         );
     },
 
-    searchMode: 'place', searchTimer: null,
+    searchMode: 'place', searchScope: 'all', searchTimer: null,
 
     setSearchMode(mode) {
         this.searchMode = mode;
         document.querySelectorAll('.search-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        const scopeWrap = document.getElementById('searchScopeWrap');
+        if (scopeWrap) scopeWrap.style.display = mode === 'layer' ? 'flex' : 'none';
         const input = this._dom.searchInput;
         const placeholders = { place: '搜索地点...', layer: '搜索图层属性...', coord: '经度, 纬度 如: 118.63, 37.42' };
         input.placeholder = placeholders[mode] || '搜索...';
         input.value = '';
         this._dom.searchResults.classList.remove('has-items');
         this._dom.searchResults.innerHTML = '';
+    },
+
+    setSearchScope(scope) {
+        this.searchScope = scope;
+        document.querySelectorAll('.search-scope-btn').forEach(b => b.classList.toggle('active', b.dataset.scope === scope));
+        const input = this._dom.searchInput;
+        if (input.value.trim()) this.doSearch();
     },
 
     doSearch() {
@@ -657,12 +666,19 @@ const App = {
     searchLayer(query) {
         const container = this._dom.searchResults;
         const q = query.toLowerCase();
+        const scope = this.searchScope;
         const matches = [];
         for (const [layerId, data] of Object.entries(this.importedLayers)) {
             if (!data._searchIndex) this._buildSearchIndex(layerId);
             const ln = data.name;
             const index = data._searchIndex;
-            const inverted = data._searchInverted;
+
+            const checkName = (item) => item.nameText.includes(q);
+            const checkDesc = (item) => item.descText.includes(q);
+            const checkAll = (item) => item.nameText.includes(q) || item.descText.includes(q);
+            const checkItem = scope === 'name' ? checkName : scope === 'desc' ? checkDesc : checkAll;
+
+            const inverted = scope === 'name' ? data._nameInverted : scope === 'desc' ? data._descInverted : null;
             if (inverted && inverted.has(q)) {
                 const hits = inverted.get(q);
                 for (let i = 0; i < hits.length; i++) {
@@ -672,7 +688,7 @@ const App = {
             } else {
                 for (let i = 0; i < index.length; i++) {
                     const item = index[i];
-                    if (item.text.includes(q)) {
+                    if (checkItem(item)) {
                         matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
                     }
                 }
@@ -722,32 +738,42 @@ const App = {
         const data = this.importedLayers[layerId];
         if (!data) return;
         const index = [];
-        const inverted = new Map();
-        const skip = new Set(['_kmlStyle', '_styleUrl', '_kmlDescription', 'styleUrl', 'styleHash']);
+        const nameInverted = new Map();
+        const descInverted = new Map();
+        const skip = new Set(['_kmlStyle', '_styleUrl', 'styleUrl', 'styleHash']);
         data.layer.eachLayer(sub => {
             const f = sub.feature;
             if (!f?.properties) return;
             const name = f.properties.name || '';
-            let combined = name.toLowerCase();
-            const tokens = new Set();
-            if (name) tokens.add(name.toLowerCase());
-            for (const [k, v] of Object.entries(f.properties)) {
-                if (skip.has(k) || k.startsWith('_') || k === 'name') continue;
-                if (v) {
-                    const vs = String(v).toLowerCase();
-                    combined += '\x00' + vs;
-                    if (vs.length <= 50) tokens.add(vs);
-                }
+            let nameText = name.toLowerCase();
+            let descText = '';
+            const kd = f.properties._kmlDescription;
+            if (kd) {
+                const tmp = document.createElement('div');
+                tmp.innerHTML = kd;
+                descText = (tmp.textContent || tmp.innerText || '').toLowerCase();
             }
             const idx = index.length;
-            index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), text: combined });
-            for (const token of tokens) {
-                if (!inverted.has(token)) inverted.set(token, []);
-                inverted.get(token).push(idx);
+            index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), nameText, descText });
+            if (name) {
+                const token = name.toLowerCase();
+                if (!nameInverted.has(token)) nameInverted.set(token, []);
+                nameInverted.get(token).push(idx);
+            }
+            if (descText) {
+                for (const [k, v] of Object.entries(f.properties)) {
+                    if (skip.has(k) || k.startsWith('_') || k === 'name') continue;
+                    if (v && String(v).length <= 50) {
+                        const token = String(v).toLowerCase();
+                        if (!descInverted.has(token)) descInverted.set(token, []);
+                        descInverted.get(token).push(idx);
+                    }
+                }
             }
         });
         data._searchIndex = index;
-        data._searchInverted = inverted;
+        data._nameInverted = nameInverted;
+        data._descInverted = descInverted;
     },
 
     escH(s) { return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') : ''; },
@@ -1512,7 +1538,8 @@ const App = {
             const newName = input.value.trim() || d.name;
             d.name = newName;
             d._searchIndex = null;
-            d._searchInverted = null;
+            d._nameInverted = null;
+            d._descInverted = null;
             el.textContent = newName;
             const saved = await Storage.getLayer(id);
             if (saved) await Storage.saveLayer(id, { ...saved, name: d.name });
@@ -1579,7 +1606,8 @@ const App = {
             this._layerOrder = (this._layerOrder || []).filter(x => String(x) !== String(id));
             this._flatLabelCache = null;
             if (d._searchIndex) d._searchIndex = null;
-            if (d._searchInverted) d._searchInverted = null;
+            if (d._nameInverted) d._nameInverted = null;
+            if (d._descInverted) d._descInverted = null;
             await Storage.removeLayer(id);
             this.updateImportedLayersList();
             this.updateLabelOverlay();
