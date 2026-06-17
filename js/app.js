@@ -695,10 +695,9 @@ const App = {
             }
         }
         if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; container.classList.add('has-items'); return; }
-        const limit = matches.slice(0, 20);
-        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个${matches.length > 20 ? '（前20）' : ''}</div>` + limit.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
+        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
         container.classList.add('has-items');
-        this._lastSearch = limit;
+        this._lastSearch = matches;
     },
 
     goToLayer(i) {
@@ -865,7 +864,9 @@ const App = {
         si.addEventListener('input', () => {
             clearTimeout(this.searchTimer);
             if (!si.value.trim()) { this._dom.searchResults.classList.remove('has-items'); this._dom.searchResults.innerHTML = ''; return; }
-            this.searchTimer = setTimeout(() => this.doSearch(), 400);
+            if (this.searchMode !== 'layer') {
+                this.searchTimer = setTimeout(() => this.doSearch(), 400);
+            }
         });
         document.addEventListener('click', e => {
             if (!e.target.closest('.search-box')) this._dom.searchResults.classList.remove('has-items');
