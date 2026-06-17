@@ -391,17 +391,6 @@ body {
   to { transform: rotate(360deg); }
 }
 
-.search-load-more {
-  padding: 12px 8px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
 /* ── Map Controls ─────────────────────── */
 .locate-btn {
   width: 36px;
