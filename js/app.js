@@ -666,51 +666,24 @@ const App = {
     searchLayer(query) {
         const container = this._dom.searchResults;
         const q = query.toLowerCase();
-        const scope = this.searchScope;
-        const LIMIT = 50;
-        container.innerHTML = '<div class="search-hint"><div class="search-spinner"></div> 搜索中...</div>';
-        container.classList.add('has-items');
-        setTimeout(() => {
-            const matches = [];
-            let total = 0;
-            for (const [layerId, data] of Object.entries(this.importedLayers)) {
-                if (!data._searchIndex) this._buildSearchIndex(layerId);
-                const ln = data.name;
-                const index = data._searchIndex;
-
-                const checkName = (item) => item.nameText.includes(q);
-                const checkDesc = (item) => item.descText.includes(q);
-                const checkAll = (item) => item.nameText.includes(q) || item.descText.includes(q);
-                const checkItem = scope === 'name' ? checkName : scope === 'desc' ? checkDesc : checkAll;
-
-                const inverted = scope === 'name' ? data._nameInverted : scope === 'desc' ? data._descInverted : null;
-                if (inverted && inverted.has(q)) {
-                    const hits = inverted.get(q);
-                    for (let i = 0; i < hits.length; i++) {
-                        const item = index[hits[i]];
-                        total++;
-                        if (matches.length < LIMIT) {
-                            matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
-                        }
-                    }
-                } else {
-                    for (let i = 0; i < index.length; i++) {
-                        const item = index[i];
-                        if (checkItem(item)) {
-                            total++;
-                            if (matches.length < LIMIT) {
-                                matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
-                            }
-                        }
-                    }
+        const matches = [];
+        for (const [, { layer, name: ln }] of Object.entries(this.importedLayers)) {
+            layer.eachLayer(sub => {
+                const f = sub.feature;
+                if (!f?.properties) return;
+                const name = (f.properties.name || '').toLowerCase();
+                if (name.includes(q)) { matches.push({ display: f.properties.name || ln, sub: `来自: ${ln}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
+                for (const [k, v] of Object.entries(f.properties)) {
+                    if (k.startsWith('_') || k === 'styleUrl' || k === 'styleHash') continue;
+                    if (String(v).toLowerCase().includes(q)) { matches.push({ display: f.properties.name || ln, sub: `${k}: ${v}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
                 }
-            }
-            if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; return; }
-            this._lastSearch = matches;
-            const hint = total > LIMIT ? `找到 ${total} 个，显示前 ${LIMIT} 个` : `找到 ${matches.length} 个`;
-            container.innerHTML = `<div class="search-hint">${hint}</div>` + 
-                matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
-        }, 0);
+            });
+        }
+        if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; container.classList.add('has-items'); return; }
+        const limit = matches.slice(0, 50);
+        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个${matches.length > 50 ? '（前50）' : ''}</div>` + limit.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
+        container.classList.add('has-items');
+        this._lastSearch = limit;
     },
 
     goToLayer(i) {
