@@ -1301,12 +1301,15 @@ body {
 }
 
 .leaflet-draw-actions a {
-  width: 32px !important;
+  width: auto !important;
+  padding: 0 10px !important;
   height: 32px !important;
   line-height: 32px !important;
   background-color: var(--surface) !important;
+  color: var(--text) !important;
   border-bottom: 1px solid var(--border) !important;
   transition: background 0.15s;
+  font-size: 12px;
 }
 
 .leaflet-draw-actions a:last-child {
