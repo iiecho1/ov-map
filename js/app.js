@@ -667,10 +667,12 @@ const App = {
         const container = this._dom.searchResults;
         const q = query.toLowerCase();
         const scope = this.searchScope;
+        const LIMIT = 50;
         container.innerHTML = '<div class="search-hint"><div class="search-spinner"></div> 搜索中...</div>';
         container.classList.add('has-items');
         setTimeout(() => {
             const matches = [];
+            let total = 0;
             for (const [layerId, data] of Object.entries(this.importedLayers)) {
                 if (!data._searchIndex) this._buildSearchIndex(layerId);
                 const ln = data.name;
@@ -686,20 +688,27 @@ const App = {
                     const hits = inverted.get(q);
                     for (let i = 0; i < hits.length; i++) {
                         const item = index[hits[i]];
-                        matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                        total++;
+                        if (matches.length < LIMIT) {
+                            matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                        }
                     }
                 } else {
                     for (let i = 0; i < index.length; i++) {
                         const item = index[i];
                         if (checkItem(item)) {
-                            matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                            total++;
+                            if (matches.length < LIMIT) {
+                                matches.push({ display: item.display, sub: `来自: ${ln}`, layer: item.sub, latlng: item.latlng });
+                            }
                         }
                     }
                 }
             }
             if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; return; }
             this._lastSearch = matches;
-            container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个</div>` + 
+            const hint = total > LIMIT ? `找到 ${total} 个，显示前 ${LIMIT} 个` : `找到 ${matches.length} 个`;
+            container.innerHTML = `<div class="search-hint">${hint}</div>` + 
                 matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
         }, 0);
     },
@@ -743,6 +752,7 @@ const App = {
         const nameInverted = new Map();
         const descInverted = new Map();
         const skip = new Set(['_kmlStyle', '_styleUrl', 'styleUrl', 'styleHash']);
+        const htmlRe = /<[^>]+>/g;
         data.layer.eachLayer(sub => {
             const f = sub.feature;
             if (!f?.properties) return;
@@ -751,9 +761,7 @@ const App = {
             let descText = '';
             const kd = f.properties._kmlDescription;
             if (kd) {
-                const tmp = document.createElement('div');
-                tmp.innerHTML = kd;
-                descText = (tmp.textContent || tmp.innerText || '').toLowerCase();
+                descText = kd.replace(htmlRe, ' ').toLowerCase();
             }
             const idx = index.length;
             index.push({ display: name || data.name, sub, latlng: this.getCenter(sub, f), nameText, descText });
