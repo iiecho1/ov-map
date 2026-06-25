@@ -751,7 +751,9 @@ const Admin = {
             if (!file || !file.text) { showToast('文件内容为空', 'error'); return; }
             const a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob([file.text], { type: 'application/vnd.google-earth.kml+xml' }));
-            a.download = file.name || 'file.kml'; a.click(); URL.revokeObjectURL(a.href);
+            let dlName = file.name || 'file.kml';
+            if (!dlName.toLowerCase().endsWith('.kml')) dlName += '.kml';
+            a.download = dlName; a.click(); URL.revokeObjectURL(a.href);
         }
     },
 
