@@ -438,6 +438,7 @@ const Admin = {
                         <button class="btn btn-xs" onclick="Admin.startRename('${f.id}')" title="重命名">&#9998; 重命名</button>
                         <button class="btn btn-xs ${enabled ? 'btn-warn' : 'btn-primary'}" onclick="Admin.toggleFile('${f.id}')">${enabled ? '禁用' : '启用'}</button>
                         <button class="btn btn-xs" onclick="Admin.showFileDetail('${f.id}')" title="查看详情">&#128269; 详情</button>
+                        <button class="btn btn-xs btn-primary" onclick="Admin.downloadFile('${f.id}')">&#8681; 下载</button>
                         <button class="btn btn-xs btn-danger" onclick="Admin.deleteFile('${f.id}', '${this.escA(f.name)}')">&#10005; 删除</button>
                     </div>
                 </div>`;
