@@ -726,6 +726,7 @@ body {
   transition: all 0.15s;
   font-family: inherit;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .btn-inline:hover {

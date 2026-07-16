@@ -211,6 +211,7 @@ const App = {
     layerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'],
     colorIndex: 0, _saveTimer: null, _importing: false, _layerOrder: [], _flatLabelCache: null,
     _cursorRaf: null, _cursorLatest: null, _layerListRaf: null, _allLayersHidden: false, _savedLayerVisibility: {},
+    _labelVisible: true,
     _dom: {},
     _popupLru: null,
 
@@ -313,7 +314,7 @@ const App = {
                 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.clearRect(0, 0, size.x, size.y);
 
-                if (map.getZoom() < 14) return;
+                if (!App._labelVisible || map.getZoom() < 14) return;
 
                 const bounds = map.getBounds();
                 const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
@@ -339,12 +340,14 @@ const App = {
 
     updateLabelOverlay() {
         this._flatLabelCache = null;
+        this._labelGridIndex = null;
         if (this.labelOverlay && this.labelOverlay._update) this.labelOverlay._update();
     },
 
     _getFlatLabelCache() {
         if (this._flatLabelCache) return this._flatLabelCache;
         const flat = [];
+        const grid = new Map();
         const layers = this.importedLayers;
         for (const id in layers) {
             const data = layers[id];
@@ -359,26 +362,44 @@ const App = {
                     else continue;
                 }
                 flat.push(item);
+                const gx = Math.floor(item._c.lat * 10);
+                const gy = Math.floor(item._c.lng * 10);
+                let row = grid.get(gx);
+                if (!row) { row = new Map(); grid.set(gx, row); }
+                let cell = row.get(gy);
+                if (!cell) { cell = []; row.set(gy, cell); }
+                cell.push(item);
             }
         }
         this._flatLabelCache = flat;
+        this._labelGridIndex = grid;
         return flat;
     },
 
     _getLabelSpatialIndex(items, gridSize, filterBounds) {
         if (!filterBounds) return items;
+        const grid = this._labelGridIndex;
+        if (!grid) return items;
         const sw = filterBounds.getSouthWest(), ne = filterBounds.getNorthEast();
-        const minLat = Math.floor(sw.lat / gridSize) * gridSize;
-        const maxLat = Math.ceil(ne.lat / gridSize) * gridSize;
-        const minLng = Math.floor(sw.lng / gridSize) * gridSize;
-        const maxLng = Math.ceil(ne.lng / gridSize) * gridSize;
+        const minGX = Math.floor(sw.lat * 10);
+        const maxGX = Math.floor(ne.lat * 10);
+        const minGY = Math.floor(sw.lng * 10);
+        const maxGY = Math.floor(ne.lng * 10);
         const result = [];
-        for (let k = 0; k < items.length; k++) {
-            const item = items[k];
-            if (!item._c) continue;
-            const lat = item._c.lat, lng = item._c.lng;
-            if (lat < minLat || lat > maxLat || lng < minLng || lng > maxLng) continue;
-            result.push(item);
+        for (let gx = minGX; gx <= maxGX; gx++) {
+            const row = grid.get(gx);
+            if (!row) continue;
+            for (let gy = minGY; gy <= maxGY; gy++) {
+                const cell = row.get(gy);
+                if (!cell) continue;
+                for (let k = 0; k < cell.length; k++) {
+                    const item = cell[k];
+                    if (!item._c) continue;
+                    const lat = item._c.lat, lng = item._c.lng;
+                    if (lat < sw.lat || lat > ne.lat || lng < sw.lng || lng > ne.lng) continue;
+                    result.push(item);
+                }
+            }
         }
         return result;
     },
@@ -667,23 +688,38 @@ const App = {
         const container = this._dom.searchResults;
         const q = query.toLowerCase();
         const matches = [];
-        for (const [, { layer, name: ln }] of Object.entries(this.importedLayers)) {
-            layer.eachLayer(sub => {
-                const f = sub.feature;
-                if (!f?.properties) return;
-                const name = (f.properties.name || '').toLowerCase();
-                if (name.includes(q)) { matches.push({ display: f.properties.name || ln, sub: `来自: ${ln}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
-                for (const [k, v] of Object.entries(f.properties)) {
-                    if (k.startsWith('_') || k === 'styleUrl' || k === 'styleHash') continue;
-                    if (String(v).toLowerCase().includes(q)) { matches.push({ display: f.properties.name || ln, sub: `${k}: ${v}`, layer: sub, latlng: this.getCenter(sub, f) }); return; }
+        const seen = new Set();
+        for (const [layerId, data] of Object.entries(this.importedLayers)) {
+            if (!data._searchIndex) this._buildSearchIndex(layerId);
+            const idx = data._searchIndex;
+            if (!idx) continue;
+            for (let i = 0; i < idx.length; i++) {
+                if (matches.length >= 50) break;
+                const item = idx[i];
+                if (seen.has(item.sub)) continue;
+                let matched = false, sub = '';
+                if (item.nameText && item.nameText.includes(q)) { matched = true; }
+                else if (item.descText && item.descText.includes(q)) { matched = true; sub = '描述匹配'; }
+                else {
+                    const props = item.sub.feature?.properties;
+                    if (props) {
+                        for (const [k, v] of Object.entries(props)) {
+                            if (k.startsWith('_') || k === 'styleUrl' || k === 'styleHash') continue;
+                            if (String(v).toLowerCase().includes(q)) { matched = true; sub = `${k}: ${v}`; break; }
+                        }
+                    }
                 }
-            });
+                if (matched) {
+                    seen.add(item.sub);
+                    matches.push({ display: item.display, sub: sub || `来自: ${data.name}`, layer: item.sub, latlng: item.latlng });
+                }
+            }
+            if (matches.length >= 50) break;
         }
         if (!matches.length) { container.innerHTML = '<div class="search-hint">未找到匹配</div>'; container.classList.add('has-items'); return; }
-        const limit = matches.slice(0, 50);
-        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个${matches.length > 50 ? '（前50）' : ''}</div>` + limit.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
+        container.innerHTML = `<div class="search-hint">找到 ${matches.length} 个${matches.length > 50 ? '（前50）' : ''}</div>` + matches.map((m, i) => `<div class="search-result-item layer-match" onclick="App.goToLayer(${i})"><div class="result-name">${this.escH(m.display)}</div><div class="result-sub">${this.escH(m.sub)}</div></div>`).join('');
         container.classList.add('has-items');
-        this._lastSearch = limit;
+        this._lastSearch = matches;
     },
 
     goToLayer(i) {
@@ -701,7 +737,9 @@ const App = {
 
     getCenter(sub, f) {
         if (f.geometry?.type === 'Point') { const c = f.geometry.coordinates; return [c[1], c[0]]; }
-        return sub.getBounds?.().isValid?.() ? sub.getBounds().getCenter() : null;
+        if (!sub.getBounds) return null;
+        const b = sub.getBounds();
+        return b.isValid() ? b.getCenter() : null;
     },
 
     createMarkerWithPopup(latlng, popupHtml, options = {}) {
@@ -1283,6 +1321,7 @@ const App = {
             }
         });
         this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
+        this._buildSearchIndex(layerId);
         return group;
     },
 
@@ -1545,6 +1584,18 @@ const App = {
                 if (saved) await Storage.saveLayer(id, { ...saved, visible: vis });
             } catch (e) { console.error('toggleLayer save failed:', id, e); }
         }
+    },
+
+    toggleLabels() {
+        this._labelVisible = !this._labelVisible;
+        const btn = document.getElementById('toggleLabelsBtn');
+        if (btn) {
+            btn.innerHTML = this._labelVisible
+                ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>隐藏标签'
+                : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>显示标签';
+            btn.title = this._labelVisible ? '隐藏标签名' : '显示标签名';
+        }
+        this.updateLabelOverlay();
     },
 
     toggleAllLayers() {

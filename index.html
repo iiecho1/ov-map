@@ -143,12 +143,18 @@
                 <div class="section-header">
                     <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-                        已导入图层
+                        图层
                     </h4>
-                    <button class="btn-inline" id="toggleAllLayersBtn" onclick="App.toggleAllLayers()" title="隐藏/显示全部图层">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        隐藏全部
-                    </button>
+                    <div style="display:flex;gap:4px">
+                        <button class="btn-inline" id="toggleLabelsBtn" onclick="App.toggleLabels()" title="隐藏标签名">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+                            隐藏标签
+                        </button>
+                        <button class="btn-inline" id="toggleAllLayersBtn" onclick="App.toggleAllLayers()" title="隐藏/显示全部图层">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            隐藏全部
+                        </button>
+                    </div>
                 </div>
                 <div id="importedLayers" class="layer-list"></div>
             </div>
