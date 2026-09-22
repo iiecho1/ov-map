@@ -128,51 +128,85 @@ const Storage = {
     }
 };
 
+const GCJ_PI = Math.PI;
+const GCJ_A = 6378245.0;
+const GCJ_EE = 0.00669342162296594323;
+const GCJ_D2R = Math.PI / 180;
+const GCJ_R2D = 180 / Math.PI;
+const MERC_R = 6378137;
+const MERC_D = Math.PI / 180;
+const MERC_MAX_LAT = 85.0511287798;
+
+function gcjTransformLat(x, y) {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(y * GCJ_PI) + 40.0 * Math.sin(y / 3.0 * GCJ_PI)) * 2.0 / 3.0;
+    ret += (160.0 * Math.sin(y / 12.0 * GCJ_PI) + 320 * Math.sin(y * GCJ_PI / 30.0)) * 2.0 / 3.0;
+    return ret;
+}
+
+function gcjTransformLng(x, y) {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(x * GCJ_PI) + 40.0 * Math.sin(x / 3.0 * GCJ_PI)) * 2.0 / 3.0;
+    ret += (150.0 * Math.sin(x / 12.0 * GCJ_PI) + 300.0 * Math.sin(x / 30.0 * GCJ_PI)) * 2.0 / 3.0;
+    return ret;
+}
+
+function gcjDelta(lat, lng) {
+    let dLat = gcjTransformLat(lng - 105.0, lat - 35.0);
+    let dLng = gcjTransformLng(lng - 105.0, lat - 35.0);
+    const radLat = lat * GCJ_D2R;
+    let magic = Math.sin(radLat);
+    magic = 1 - GCJ_EE * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / ((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic) * GCJ_PI);
+    dLng = (dLng * 180.0) / (GCJ_A / sqrtMagic * Math.cos(radLat) * GCJ_PI);
+    return { dLat, dLng };
+}
+
+const _gcjCache = new Map();
+const GCJ_CACHE_MAX = 8192;
+
+function gcjDeltaCached(lat, lng) {
+    const key = ((lat * 1e6) | 0) + ':' + ((lng * 1e6) | 0);
+    let hit = _gcjCache.get(key);
+    if (hit !== undefined) return hit;
+    hit = gcjDelta(lat, lng);
+    if (_gcjCache.size >= GCJ_CACHE_MAX) _gcjCache.clear();
+    _gcjCache.set(key, hit);
+    return hit;
+}
+
 L.GCJ02 = {
-    _PI: Math.PI,
-    _a: 6378245.0,
-    _ee: 0.00669342162296594323,
-    _transform(lat, lng) {
-        let dLat = this._transformLat(lng - 105.0, lat - 35.0);
-        let dLng = this._transformLng(lng - 105.0, lat - 35.0);
-        const radLat = lat / 180.0 * this._PI;
-        let magic = Math.sin(radLat);
-        magic = 1 - this._ee * magic * magic;
-        const sqrtMagic = Math.sqrt(magic);
-        dLat = (dLat * 180.0) / ((this._a * (1 - this._ee)) / (magic * sqrtMagic) * this._PI);
-        dLng = (dLng * 180.0) / (this._a / sqrtMagic * Math.cos(radLat) * this._PI);
-        return { lat: lat + dLat, lng: lng + dLng };
+    wgs84ToGcj02(lat, lng) {
+        const t = gcjDeltaCached(lat, lng);
+        return { lat: lat + t.dLat, lng: lng + t.dLng };
     },
-    _transformLat(x, y) {
-        let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
-        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
-        ret += (20.0 * Math.sin(y * this._PI) + 40.0 * Math.sin(y / 3.0 * this._PI)) * 2.0 / 3.0;
-        ret += (160.0 * Math.sin(y / 12.0 * this._PI) + 320 * Math.sin(y * this._PI / 30.0)) * 2.0 / 3.0;
-        return ret;
-    },
-    _transformLng(x, y) {
-        let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
-        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
-        ret += (20.0 * Math.sin(x * this._PI) + 40.0 * Math.sin(x / 3.0 * this._PI)) * 2.0 / 3.0;
-        ret += (150.0 * Math.sin(x / 12.0 * this._PI) + 300.0 * Math.sin(x / 30.0 * this._PI)) * 2.0 / 3.0;
-        return ret;
-    },
-    wgs84ToGcj02(lat, lng) { return this._transform(lat, lng); },
     gcj02ToWgs84(lat, lng) {
-        const t = this._transform(lat, lng);
-        return { lat: lat * 2 - t.lat, lng: lng * 2 - t.lng };
+        const t = gcjDeltaCached(lat, lng);
+        return { lat: lat - t.dLat, lng: lng - t.dLng };
     }
 };
 
 L.Projection.GCJ02Mercator = L.extend({}, L.Projection.SphericalMercator, {
     project(latlng) {
-        const gcj = L.GCJ02.wgs84ToGcj02(latlng.lat, latlng.lng);
-        return L.Projection.SphericalMercator.project(new L.LatLng(gcj.lat, gcj.lng));
+        const t = gcjDeltaCached(latlng.lat, latlng.lng);
+        let lat = latlng.lat + t.dLat;
+        if (lat > MERC_MAX_LAT) lat = MERC_MAX_LAT;
+        else if (lat < -MERC_MAX_LAT) lat = -MERC_MAX_LAT;
+        const sin = Math.sin(lat * MERC_D);
+        const lng = (latlng.lng + t.dLng) * MERC_D;
+        return new L.Point(
+            MERC_R * lng,
+            MERC_R * Math.log((1 + sin) / (1 - sin)) / 2
+        );
     },
     unproject(point) {
-        const gcjLatLng = L.Projection.SphericalMercator.unproject(point);
-        const wgs = L.GCJ02.gcj02ToWgs84(gcjLatLng.lat, gcjLatLng.lng);
-        return new L.LatLng(wgs.lat, wgs.lng);
+        const lat = (2 * Math.atan(Math.exp(point.y / MERC_R)) - (Math.PI / 2)) * GCJ_R2D;
+        const lng = point.x / MERC_R * GCJ_R2D;
+        const t = gcjDeltaCached(lat, lng);
+        return new L.LatLng(lat - t.dLat, lng - t.dLng);
     }
 });
 
@@ -250,7 +284,7 @@ const App = {
     },
 
     initMap() {
-        this.canvasRenderer = L.canvas({ padding: 0.1 });
+        this.canvasRenderer = L.canvas({ padding: 0.4 });
         this.map = L.map('map', {
             center: [35.8617, 104.1954], zoom: 5, zoomControl: true,
             preferCanvas: true, renderer: this.canvasRenderer
@@ -323,15 +357,37 @@ const App = {
                 const pad = 100;
                 const items = App._getFlatLabelCache();
                 const grid = App._getLabelSpatialIndex(items, GRID_SIZE, filterBounds);
-                ctx.beginPath();
+                const maxLabels = 350;
+                const cell = 64;
+                const cols = ((size.x / cell) | 0) + 3;
+                const rows = ((size.y / cell) | 0) + 3;
+                let occupied = this._occupied;
+                if (!occupied || occupied.length < cols * rows) {
+                    occupied = this._occupied = new Uint8Array(cols * rows);
+                } else {
+                    occupied.fill(0);
+                }
+                let drawn = 0;
                 for (let k = 0; k < grid.length; k++) {
+                    if (drawn >= maxLabels) break;
                     const item = grid[k];
                     const pt = map.latLngToContainerPoint(item._c);
                     if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
+                    const cx = ((pt.x / cell) | 0) + 1;
+                    const cy = ((pt.y / cell) | 0) + 1;
+                    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+                    const span = item.text.length > 6 ? 3 : item.text.length > 3 ? 2 : 1;
+                    let blocked = false;
+                    const maxSx = Math.min(span, cols - cx);
+                    for (let sx = 0; sx < maxSx; sx++) {
+                        if (occupied[cy * cols + cx + sx]) { blocked = true; break; }
+                    }
+                    if (blocked) continue;
+                    for (let sx = 0; sx < maxSx; sx++) occupied[cy * cols + cx + sx] = 1;
                     ctx.strokeText(item.text, pt.x, pt.y);
                     ctx.fillText(item.text, pt.x, pt.y);
+                    drawn++;
                 }
-                ctx.stroke();
             }
         });
         this.labelOverlay = new Overlay();
@@ -993,7 +1049,12 @@ const App = {
             this._cursorRaf = requestAnimationFrame(() => {
                 this._cursorRaf = null;
                 const ev = this._cursorLatest;
-                if (ev) this._dom.cursorPos.textContent = `经度: ${ev.latlng.lng.toFixed(6)}, 纬度: ${ev.latlng.lat.toFixed(6)}`;
+                if (!ev) return;
+                const text = `经度: ${ev.latlng.lng.toFixed(6)}, 纬度: ${ev.latlng.lat.toFixed(6)}`;
+                if (text !== this._cursorText) {
+                    this._cursorText = text;
+                    this._dom.cursorPos.textContent = text;
+                }
             });
         });
         this.map.on('zoomend', () => { this._dom.zoomLevel.textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
@@ -1282,11 +1343,13 @@ const App = {
                     if (f.properties?.name) labelCache.push({ text: f.properties.name, latlng: ll, type: 'point' });
                     layer = m;
                 } else {
+                    const style = self.getStyle(f, fallback);
                     layer = L.GeoJSON.geometryToLayer(f, {
-                        renderer: self.canvasRenderer
+                        renderer: self.canvasRenderer,
+                        smoothFactor: 1.5,
+                        ...style
                     });
                     layer.feature = f;
-                    if (layer.setStyle) layer.setStyle(self.getStyle(f, fallback));
                     if ((gt === 'Polygon' || gt === 'MultiPolygon') && f.properties?.name) {
                         labelCache.push({ text: f.properties.name, bounds: layer.getBounds(), type: 'polygon' });
                     }

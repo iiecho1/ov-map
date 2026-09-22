@@ -755,8 +755,6 @@ body {
   gap: 16px;
   transition: left 0.3s ease;
   border: 1px solid var(--coord-border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 #sidebar.collapsed ~ #coordinates {
