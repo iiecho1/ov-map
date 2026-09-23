@@ -35,6 +35,24 @@
       </div>
     </div>
 
+    <!-- 图层类型 -->
+    <div class="card" id="layerTypeSection" style="display:none">
+      <div class="card-header" onclick="toggleCard(this)">
+        <span class="dot"></span> 图层类型
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="layer-type-toggle">
+          <label class="layer-type-opt active" id="layerTypeSector">
+            <input type="radio" name="layerType" value="sector" checked /> 扇区图层
+          </label>
+          <label class="layer-type-opt" id="layerTypePoint">
+            <input type="radio" name="layerType" value="point" /> 点图层
+          </label>
+        </div>
+      </div>
+    </div>
+
     <!-- 字段映射 -->
     <div class="card" id="mappingSection" style="display:none">
       <div class="card-header" onclick="toggleCard(this)">
@@ -46,7 +64,7 @@
         <div class="row"><label>标签名</label><select id="labelCol"></select></div>
         <div class="row"><label>经度</label><select id="lngCol"></select></div>
         <div class="row"><label>纬度</label><select id="latCol"></select></div>
-        <div class="row"><label>方位角</label><select id="azimuthCol"><option value="">-- 不使用 --</option></select></div>
+        <div class="row" id="azimuthRow"><label>方位角</label><select id="azimuthCol"><option value="">-- 不使用 --</option></select></div>
       </div>
     </div>
 
@@ -63,6 +81,29 @@
         <div class="row"><label>填充颜色</label><input type="color" id="defaultFillColor" value="#7c8cf8" /></div>
         <div class="row"><label>边框颜色</label><input type="color" id="defaultLineColor" value="#f87171" /></div>
         <div class="row"><label style="min-width:auto;cursor:pointer"><input type="checkbox" id="showBorder" checked style="margin-right:6px" />显示边框</label></div>
+      </div>
+    </div>
+
+    <!-- 点样式 -->
+    <div class="card" id="pointSection" style="display:none">
+      <div class="card-header" onclick="toggleCard(this)">
+        <span class="dot"></span> 点样式
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="row"><label>图标</label><select id="pointIcon">
+          <option value="circle">圆形</option>
+          <option value="square">方形</option>
+          <option value="star">星形</option>
+          <option value="diamond">菱形</option>
+          <option value="triangle">三角</option>
+          <option value="pin">图钉</option>
+        </select></div>
+        <div class="row"><label>点颜色</label><input type="color" id="pointColor" value="#7c8cf8" /></div>
+        <div class="row"><label>点大小</label><input type="range" id="pointScale" min="0.4" max="3" step="0.1" value="1.2" /><input type="number" id="pointScaleInput" min="0.4" max="3" step="0.1" value="1.2" style="width:56px;flex:none" /></div>
+        <div class="row"><label style="min-width:auto;cursor:pointer"><input type="checkbox" id="showLabel" checked style="margin-right:6px" />显示标签</label></div>
+        <div class="row"><label>标签颜色</label><input type="color" id="labelColor" value="#ffffff" /></div>
+        <div class="row"><label>标签大小</label><input type="range" id="labelScale" min="0.4" max="2" step="0.1" value="0.8" /><input type="number" id="labelScaleInput" min="0.4" max="2" step="0.1" value="0.8" style="width:56px;flex:none" /></div>
       </div>
     </div>
 
@@ -179,8 +220,18 @@ let currentSheetData = [];
 let currentHeaders = [];
 let sourceFileName = '';
 let lastKmlData = null;
+let layerType = 'sector';
 
 const DEFAULT_COLORS = ['#ffff80','#00ff00','#8000ff','#ff0080','#00ffff','#ff8000','#80ff00','#0080ff','#ff0000','#00ff80'];
+
+const KML_ICONS = {
+  circle: 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png',
+  square: 'http://maps.google.com/mapfiles/kml/shapes/placemark_square.png',
+  star: 'http://maps.google.com/mapfiles/kml/shapes/star.png',
+  diamond: 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png',
+  triangle: 'http://maps.google.com/mapfiles/kml/shapes/placemark_triangle.png',
+  pin: 'http://maps.google.com/mapfiles/kml/paddle/wht-blank.png'
+};
 
 function toggleCard(headerEl) {
   const body = headerEl.parentElement.querySelector('.card-body');
@@ -195,10 +246,34 @@ function toggleCard(headerEl) {
   }
 }
 
+function getLayerType() {
+  const el = document.querySelector('input[name="layerType"]:checked');
+  return el ? el.value : 'sector';
+}
+
+function setLayerType(type) {
+  layerType = type;
+  document.querySelectorAll('input[name="layerType"]').forEach(r => { r.checked = (r.value === type); });
+  document.getElementById('layerTypeSector').classList.toggle('active', type === 'sector');
+  document.getElementById('layerTypePoint').classList.toggle('active', type === 'point');
+  $('azimuthRow').style.display = type === 'sector' ? '' : 'none';
+  $('polygonSection').style.display = type === 'sector' ? '' : 'none';
+  $('pointSection').style.display = type === 'point' ? '' : 'none';
+  updateCatRowMode();
+}
+
+document.querySelectorAll('input[name="layerType"]').forEach(r => {
+  r.addEventListener('change', () => setLayerType(r.value));
+});
+
 $('sectorAngle').addEventListener('input', e => { $('sectorAngleInput').value = e.target.value; });
 $('sectorAngleInput').addEventListener('input', e => { $('sectorAngle').value = e.target.value; });
 $('sectorRadius').addEventListener('input', e => { $('sectorRadiusInput').value = e.target.value; });
 $('sectorRadiusInput').addEventListener('input', e => { $('sectorRadius').value = e.target.value; });
+$('pointScale').addEventListener('input', e => { $('pointScaleInput').value = e.target.value; });
+$('pointScaleInput').addEventListener('input', e => { $('pointScale').value = e.target.value; });
+$('labelScale').addEventListener('input', e => { $('labelScaleInput').value = e.target.value; });
+$('labelScaleInput').addEventListener('input', e => { $('labelScale').value = e.target.value; });
 
 $('fileInput').addEventListener('change', e => {
   const file = e.target.files[0];
@@ -211,7 +286,8 @@ $('fileInput').addEventListener('change', e => {
     setTimeout(() => {
       workbook = XLSX.read(ev.target.result, {type:'array'});
       populateSheetSelect();
-      ['mappingSection','columnsSection','polygonSection','categorySection','generateSection'].forEach(id => $(id).style.display='');
+      ['layerTypeSection','mappingSection','columnsSection','polygonSection','categorySection','generateSection'].forEach(id => $(id).style.display='');
+      setLayerType(getLayerType());
       loadSheet(workbook.SheetNames[0]);
       $('loadingOverlay').classList.remove('show');
     }, 30);
@@ -351,43 +427,91 @@ function addCatRow() {
 
   const idx = catRowCount++;
   const fillC = DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
-  const defAngle = $('sectorAngle').value;
-  const defRadius = $('sectorRadius').value;
-  const defShape = $('defaultShape').value;
+  const isPoint = getLayerType() === 'point';
 
   const div = document.createElement('div');
-  div.className = 'cat-item';
+  div.className = 'cat-item ' + (isPoint ? 'cat-point' : 'cat-sector');
   div.dataset.idx = idx;
-  div.innerHTML = `
-    <select class="cat-val-select" data-idx="${idx}">${available.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
-    <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${defShape==='sector'?' selected':''}>扇形</option><option value="sword"${defShape==='sword'?' selected':''}>剑形</option><option value="triangle"${defShape==='triangle'?' selected':''}>三角形</option></select>
-    <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${defAngle}" min="0" max="90" step="5" />
-    <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${defRadius}" min="0" max="150" step="5" />
-    <span class="sep"></span>
-    <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${fillC}" />
-    <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="#f87171" />
-    <select class="cat-fill-style" data-idx="${idx}"><option value="solid">实线</option><option value="no-border">无边框</option></select>
-    <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="90" min="0" max="100" step="5" />
-    <button class="cat-del" data-idx="${idx}">×</button>
-  `;
+
+  if (isPoint) {
+    const defIcon = $('pointIcon').value;
+    const defScale = $('pointScale').value;
+    const defLabelColor = $('labelColor').value;
+    const defLabelScale = $('labelScale').value;
+    const defShowLabel = $('showLabel').checked;
+    div.innerHTML = `
+      <select class="cat-val-select" data-idx="${idx}">${available.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
+      <label>图标</label><select class="cat-icon" data-idx="${idx}">
+        <option value="circle"${defIcon==='circle'?' selected':''}>圆形</option>
+        <option value="square"${defIcon==='square'?' selected':''}>方形</option>
+        <option value="star"${defIcon==='star'?' selected':''}>星形</option>
+        <option value="diamond"${defIcon==='diamond'?' selected':''}>菱形</option>
+        <option value="triangle"${defIcon==='triangle'?' selected':''}>三角</option>
+        <option value="pin"${defIcon==='pin'?' selected':''}>图钉</option>
+      </select>
+      <label>颜色</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${fillC}" />
+      <label>大小</label><input type="number" class="cat-point-scale" data-idx="${idx}" value="${defScale}" min="0.4" max="3" step="0.1" />
+      <span class="sep"></span>
+      <label style="cursor:pointer"><input type="checkbox" class="cat-show-label" data-idx="${idx}" ${defShowLabel?'checked':''} /> 标签</label>
+      <label>标签色</label><input type="color" class="cat-label-color" data-idx="${idx}" value="${defLabelColor}" />
+      <label>标签大小</label><input type="number" class="cat-label-scale" data-idx="${idx}" value="${defLabelScale}" min="0.4" max="2" step="0.1" />
+      <button class="cat-del" data-idx="${idx}">×</button>
+    `;
+  } else {
+    const defAngle = $('sectorAngle').value;
+    const defRadius = $('sectorRadius').value;
+    const defShape = $('defaultShape').value;
+    div.innerHTML = `
+      <select class="cat-val-select" data-idx="${idx}">${available.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
+      <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${defShape==='sector'?' selected':''}>扇形</option><option value="sword"${defShape==='sword'?' selected':''}>剑形</option><option value="triangle"${defShape==='triangle'?' selected':''}>三角形</option></select>
+      <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${defAngle}" min="0" max="90" step="5" />
+      <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${defRadius}" min="0" max="150" step="5" />
+      <span class="sep"></span>
+      <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${fillC}" />
+      <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="#f87171" />
+      <select class="cat-fill-style" data-idx="${idx}"><option value="solid">实线</option><option value="no-border">无边框</option></select>
+      <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="90" min="0" max="100" step="5" />
+      <button class="cat-del" data-idx="${idx}">×</button>
+    `;
+  }
   $('categoryStyles').appendChild(div);
   div.querySelector('.cat-del').onclick = () => div.remove();
 }
 
+function updateCatRowMode() {
+  const isPoint = getLayerType() === 'point';
+  document.querySelectorAll('#categoryStyles .cat-item').forEach(row => {
+    row.classList.toggle('cat-point', isPoint);
+    row.classList.toggle('cat-sector', !isPoint);
+  });
+}
+
 function getCatStyleMap() {
   const m = {};
+  const isPoint = getLayerType() === 'point';
   document.querySelectorAll('#categoryStyles .cat-item').forEach(row => {
     const valSel = row.querySelector('.cat-val-select');
     if (!valSel || !valSel.value) return;
-    m[valSel.value] = {
-      shape: row.querySelector('.cat-shape')?.value || 'sector',
-      angle: parseInt(row.querySelector('.cat-angle')?.value) || 40,
-      radius: parseInt(row.querySelector('.cat-radius')?.value) || 80,
-      fillColor: row.querySelector('.cat-fill-color')?.value || '#7c8cf8',
-      lineColor: row.querySelector('.cat-line-color')?.value || '#f87171',
-      noBorder: row.querySelector('.cat-fill-style')?.value === 'no-border',
-      opacity: parseInt(row.querySelector('.cat-opacity')?.value) || 90
-    };
+    if (isPoint) {
+      m[valSel.value] = {
+        icon: row.querySelector('.cat-icon')?.value || 'circle',
+        fillColor: row.querySelector('.cat-fill-color')?.value || '#7c8cf8',
+        scale: parseFloat(row.querySelector('.cat-point-scale')?.value) || 1.2,
+        showLabel: row.querySelector('.cat-show-label')?.checked !== false,
+        labelColor: row.querySelector('.cat-label-color')?.value || '#ffffff',
+        labelScale: parseFloat(row.querySelector('.cat-label-scale')?.value) || 0.8
+      };
+    } else {
+      m[valSel.value] = {
+        shape: row.querySelector('.cat-shape')?.value || 'sector',
+        angle: parseInt(row.querySelector('.cat-angle')?.value) || 40,
+        radius: parseInt(row.querySelector('.cat-radius')?.value) || 80,
+        fillColor: row.querySelector('.cat-fill-color')?.value || '#7c8cf8',
+        lineColor: row.querySelector('.cat-line-color')?.value || '#f87171',
+        noBorder: row.querySelector('.cat-fill-style')?.value === 'no-border',
+        opacity: parseInt(row.querySelector('.cat-opacity')?.value) || 90
+      };
+    }
   });
   return m;
 }
@@ -470,6 +594,12 @@ $('btnGenerate').addEventListener('click', () => {
 $('btnExport').addEventListener('click', exportKML);
 
 function generateKML() {
+  const type = getLayerType();
+  if (type === 'point') generatePointKML();
+  else generateSectorKML();
+}
+
+function generateSectorKML() {
   const labelCol = $('labelCol').value, lngCol = $('lngCol').value, latCol = $('latCol').value, azimuthCol = $('azimuthCol').value;
   const defAngle = parseInt($('sectorAngle').value), defRadius = parseInt($('sectorRadius').value);
   const defFillColor = $('defaultFillColor').value, defShape = $('defaultShape').value;
@@ -582,6 +712,109 @@ function generateKML() {
   const fileName = (sourceFileName || 'layer_export') + '_' + sheetName + '.kml';
   lastKmlData = { text: kml, name: fileName, size: new Blob([kml]).size };
   $('statusLeft').textContent = '已生成 KML，' + count + ' 个要素，可导出或同步';
+}
+
+function generatePointKML() {
+  const labelCol = $('labelCol').value, lngCol = $('lngCol').value, latCol = $('latCol').value;
+  const defIcon = $('pointIcon').value, defColor = $('pointColor').value, defScale = parseFloat($('pointScale').value) || 1.2;
+  const defShowLabel = $('showLabel').checked, defLabelColor = $('labelColor').value, defLabelScale = parseFloat($('labelScale').value) || 0.8;
+  const categoryCol = $('categoryCol').value, enableCategory = !!categoryCol;
+  if (!lngCol || !latCol) {alert('请选择经度和纬度列'); return;}
+  const selectedCols = [...document.querySelectorAll('.col-check:checked')].map(cb => cb.dataset.col);
+  const catStyleMap = enableCategory ? getCatStyleMap() : {};
+  const allCatValues = new Set();
+  const placemarks = [];
+  const errors = [];
+  let count = 0;
+
+  currentSheetData.forEach((row, idx) => {
+    const rowNum = idx + 1;
+    const lngRaw = row[lngCol], latRaw = row[latCol];
+    const lng = parseFloat(lngRaw), lat = parseFloat(latRaw);
+
+    if (lngRaw === undefined || lngRaw === null || String(lngRaw).trim() === '') {
+      errors.push({row:rowNum, field:lngCol, val:'(空)', reason:'经度不能为空'});
+      return;
+    }
+    if (latRaw === undefined || latRaw === null || String(latRaw).trim() === '') {
+      errors.push({row:rowNum, field:latCol, val:'(空)', reason:'纬度不能为空'});
+      return;
+    }
+    if (isNaN(lng)) {
+      errors.push({row:rowNum, field:lngCol, val:String(lngRaw), reason:'经度格式错误，无法转为数字'});
+      return;
+    }
+    if (isNaN(lat)) {
+      errors.push({row:rowNum, field:latCol, val:String(latRaw), reason:'纬度格式错误，无法转为数字'});
+      return;
+    }
+
+    const label = labelCol ? String(row[labelCol]||'') : '';
+    let icon = defIcon, fillColor = defColor, scale = defScale;
+    let showLabel = defShowLabel, labelColor = defLabelColor, labelScale = defLabelScale;
+    if (enableCategory) {
+      const catVal = String(row[categoryCol]||'');
+      if (catStyleMap[catVal]) {
+        const st = catStyleMap[catVal];
+        icon = st.icon || defIcon; fillColor = st.fillColor || defColor; scale = st.scale || defScale;
+        showLabel = st.showLabel !== undefined ? st.showLabel : defShowLabel;
+        labelColor = st.labelColor || defLabelColor; labelScale = st.labelScale || defLabelScale;
+      }
+      allCatValues.add(catVal);
+    }
+    placemarks.push({label, lat, lng, row, icon, fillColor, scale, showLabel, labelColor, labelScale});
+    count++;
+  });
+
+  if (errors.length > 0) {
+    renderErrors(errors);
+  } else {
+    $('errorSection').style.display = 'none';
+  }
+
+  if (count === 0) {alert('没有有效数据'); return;}
+
+  const catArr = [...allCatValues].filter(v => v && v!=='undefined' && v!=='null');
+  catArr.sort((a,b) => { const na=parseFloat(a),nb=parseFloat(b); if(!isNaN(na)&&!isNaN(nb))return na-nb; return a.localeCompare(b); });
+  const styleMap = {};
+  catArr.forEach((val, i) => {
+    const st = catStyleMap[val] || {icon:defIcon, fillColor:defColor, scale:defScale, showLabel:defShowLabel, labelColor:defLabelColor, labelScale:defLabelScale};
+    styleMap[val] = {
+      id: 'pt'+i,
+      iconHref: KML_ICONS[st.icon] || KML_ICONS.circle,
+      color: hexToKmlColor(st.fillColor, 100),
+      scale: st.scale || 1.2,
+      showLabel: st.showLabel !== false,
+      labelColor: hexToKmlColor(st.labelColor || '#ffffff', 100),
+      labelScale: st.labelScale || 0.8
+    };
+  });
+
+  let kml = '<?xml version="1.0" encoding="utf-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>';
+  const defIconHref = KML_ICONS[defIcon] || KML_ICONS.circle;
+  const defKmlColor = hexToKmlColor(defColor, 100);
+  const defLabelKmlColor = hexToKmlColor(defLabelColor, 100);
+  kml += `<Style id="defaultPointStyle"><IconStyle><color>${defKmlColor}</color><scale>${defScale}</scale><Icon><href>${defIconHref}</href></Icon></IconStyle>${defShowLabel?`<LabelStyle><scale>${defLabelScale}</scale><color>${defLabelKmlColor}</color></LabelStyle>`:'<LabelStyle><scale>0</scale></LabelStyle>'}</Style>`;
+  for (const val in styleMap) {
+    const s = styleMap[val];
+    kml += `<Style id="${s.id}"><IconStyle><color>${s.color}</color><scale>${s.scale}</scale><Icon><href>${s.iconHref}</href></Icon></IconStyle>${s.showLabel?`<LabelStyle><scale>${s.labelScale}</scale><color>${s.labelColor}</color></LabelStyle>`:'<LabelStyle><scale>0</scale></LabelStyle>'}</Style>`;
+  }
+  kml += '<Folder><name>基站点位</name>';
+  placemarks.forEach(p => {
+    let desc="<![CDATA[<table width='300' border='1'>"; selectedCols.forEach(col=>{desc+=`<tr><th scope="col">${esc(col)}</th><th scope="col">${esc(String(p.row[col]||''))}</th></tr>`;}); desc+='</table>]]>';
+    let styleUrl = '<styleUrl>#defaultPointStyle</styleUrl>';
+    if (enableCategory && categoryCol) {
+      const cv = String(p.row[categoryCol]||'');
+      if (styleMap[cv]) styleUrl = `<styleUrl>#${styleMap[cv].id}</styleUrl>`;
+    }
+    kml += `<Placemark><name>${esc(p.label)}</name><description>${desc}</description>${styleUrl}<Point><extrude>1</extrude><altitudeMode>clampToGround</altitudeMode><coordinates>${p.lng},${p.lat},5</coordinates></Point></Placemark>`;
+  });
+  kml += '</Folder></Document></kml>';
+
+  const sheetName = $('sheetSelect').value || 'Sheet1';
+  const fileName = (sourceFileName || 'layer_export') + '_' + sheetName + '.kml';
+  lastKmlData = { text: kml, name: fileName, size: new Blob([kml]).size };
+  $('statusLeft').textContent = '已生成点图层 KML，' + count + ' 个要素，可导出或同步';
 }
 
 function exportKML() {
@@ -740,22 +973,37 @@ async function deleteCloudConfig(id) {
 
 function collectConfig() {
   const selectedCols = [...document.querySelectorAll('.col-check:checked')].map(cb => cb.dataset.col);
+  const type = getLayerType();
   const config = {
-    version: 2,
+    version: 3,
+    layerType: type,
     fieldMapping: { labelCol:$('labelCol').value, lngCol:$('lngCol').value, latCol:$('latCol').value, azimuthCol:$('azimuthCol').value },
     sectorStyle: { shape:$('defaultShape').value, angle:parseInt($('sectorAngle').value), radius:parseInt($('sectorRadius').value), fillColor:$('defaultFillColor').value, lineColor:$('defaultLineColor').value, showBorder:$('showBorder').checked },
+    pointStyle: { icon:$('pointIcon').value, color:$('pointColor').value, scale:parseFloat($('pointScale').value), showLabel:$('showLabel').checked, labelColor:$('labelColor').value, labelScale:parseFloat($('labelScale').value) },
     category: { column:$('categoryCol').value, rows:[] },
     selectedCols: selectedCols
   };
   document.querySelectorAll('#categoryStyles .cat-item').forEach(row => {
     const vs = row.querySelector('.cat-val-select');
     if (!vs || !vs.value) return;
-    config.category.rows.push({
-      value:vs.value, shape:row.querySelector('.cat-shape')?.value||'sector',
-      angle:parseInt(row.querySelector('.cat-angle')?.value)||40, radius:parseInt(row.querySelector('.cat-radius')?.value)||80,
-      fillColor:row.querySelector('.cat-fill-color')?.value||'#7c8cf8', lineColor:row.querySelector('.cat-line-color')?.value||'#f87171',
-      borderStyle:row.querySelector('.cat-fill-style')?.value||'solid', opacity:parseInt(row.querySelector('.cat-opacity')?.value)||90
-    });
+    if (type === 'point') {
+      config.category.rows.push({
+        value:vs.value,
+        icon:row.querySelector('.cat-icon')?.value||'circle',
+        fillColor:row.querySelector('.cat-fill-color')?.value||'#7c8cf8',
+        scale:parseFloat(row.querySelector('.cat-point-scale')?.value)||1.2,
+        showLabel:row.querySelector('.cat-show-label')?.checked!==false,
+        labelColor:row.querySelector('.cat-label-color')?.value||'#ffffff',
+        labelScale:parseFloat(row.querySelector('.cat-label-scale')?.value)||0.8
+      });
+    } else {
+      config.category.rows.push({
+        value:vs.value, shape:row.querySelector('.cat-shape')?.value||'sector',
+        angle:parseInt(row.querySelector('.cat-angle')?.value)||40, radius:parseInt(row.querySelector('.cat-radius')?.value)||80,
+        fillColor:row.querySelector('.cat-fill-color')?.value||'#7c8cf8', lineColor:row.querySelector('.cat-line-color')?.value||'#f87171',
+        borderStyle:row.querySelector('.cat-fill-style')?.value||'solid', opacity:parseInt(row.querySelector('.cat-opacity')?.value)||90
+      });
+    }
   });
   return config;
 }
@@ -776,7 +1024,18 @@ function importConfig(e) {
 
 let pendingConfig = null;
 
+function applyPointStyle(s) {
+  if (!s) return;
+  if (s.icon) $('pointIcon').value = s.icon;
+  if (s.color) $('pointColor').value = s.color;
+  if (s.scale !== undefined) { $('pointScale').value = s.scale; $('pointScaleInput').value = s.scale; }
+  if (s.showLabel !== undefined) $('showLabel').checked = s.showLabel;
+  if (s.labelColor) $('labelColor').value = s.labelColor;
+  if (s.labelScale !== undefined) { $('labelScale').value = s.labelScale; $('labelScaleInput').value = s.labelScale; }
+}
+
 function applyConfig(config) {
+  if (config.layerType) setLayerType(config.layerType);
   if (currentHeaders.length === 0) {
     if (config.sectorStyle) {
       const s = config.sectorStyle;
@@ -787,6 +1046,7 @@ function applyConfig(config) {
       if (s.lineColor) $('defaultLineColor').value = s.lineColor;
       if (s.showBorder !== undefined) $('showBorder').checked = s.showBorder;
     }
+    if (config.pointStyle) applyPointStyle(config.pointStyle);
     pendingConfig = config;
     return;
   }
@@ -806,6 +1066,7 @@ function applyConfig(config) {
     if (s.lineColor) $('defaultLineColor').value = s.lineColor;
     if (s.showBorder !== undefined) $('showBorder').checked = s.showBorder;
   }
+  if (config.pointStyle) applyPointStyle(config.pointStyle);
   if (config.selectedCols) {
     document.querySelectorAll('.col-check').forEach(cb => {
       cb.checked = config.selectedCols.includes(cb.dataset.col);
@@ -817,6 +1078,7 @@ function applyConfig(config) {
 function applyCategoryConfig(config) {
   if (!config.category) return;
   const catCol = $('categoryCol');
+  const isPoint = getLayerType() === 'point';
   if (config.category.column && currentHeaders.includes(config.category.column)) {
     catCol.value = config.category.column; onCategoryColChange();
     if (config.category.rows && Array.isArray(config.category.rows)) {
@@ -825,18 +1087,39 @@ function applyCategoryConfig(config) {
         if (!allVals.includes(rd.value)) return;
         const idx = catRowCount++;
         const div = document.createElement('div');
-        div.className = 'cat-item'; div.dataset.idx = idx;
-        div.innerHTML = `
-          <select class="cat-val-select" data-idx="${idx}"><option value="${esc(rd.value)}">${esc(rd.value)}</option></select>
-          <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${rd.shape==='sector'?' selected':''}>扇形</option><option value="sword"${rd.shape==='sword'?' selected':''}>剑形</option><option value="triangle"${rd.shape==='triangle'?' selected':''}>三角形</option></select>
-          <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${rd.angle||40}" min="0" max="90" step="5" />
-          <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${rd.radius||80}" min="0" max="150" step="5" />
-          <span class="sep"></span>
-          <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${rd.fillColor||'#7c8cf8'}" />
-          <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="${rd.lineColor||'#f87171'}" />
-          <select class="cat-fill-style" data-idx="${idx}"><option value="solid"${rd.borderStyle==='solid'?' selected':''}>实线</option><option value="no-border"${rd.borderStyle==='no-border'?' selected':''}>无边框</option></select>
-          <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="${rd.opacity||90}" min="0" max="100" step="5" />
-          <button class="cat-del" data-idx="${idx}">×</button>`;
+        div.className = 'cat-item ' + (isPoint ? 'cat-point' : 'cat-sector');
+        div.dataset.idx = idx;
+        if (isPoint) {
+          div.innerHTML = `
+            <select class="cat-val-select" data-idx="${idx}"><option value="${esc(rd.value)}">${esc(rd.value)}</option></select>
+            <label>图标</label><select class="cat-icon" data-idx="${idx}">
+              <option value="circle"${rd.icon==='circle'?' selected':''}>圆形</option>
+              <option value="square"${rd.icon==='square'?' selected':''}>方形</option>
+              <option value="star"${rd.icon==='star'?' selected':''}>星形</option>
+              <option value="diamond"${rd.icon==='diamond'?' selected':''}>菱形</option>
+              <option value="triangle"${rd.icon==='triangle'?' selected':''}>三角</option>
+              <option value="pin"${rd.icon==='pin'?' selected':''}>图钉</option>
+            </select>
+            <label>颜色</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${rd.fillColor||'#7c8cf8'}" />
+            <label>大小</label><input type="number" class="cat-point-scale" data-idx="${idx}" value="${rd.scale||1.2}" min="0.4" max="3" step="0.1" />
+            <span class="sep"></span>
+            <label style="cursor:pointer"><input type="checkbox" class="cat-show-label" data-idx="${idx}" ${rd.showLabel!==false?'checked':''} /> 标签</label>
+            <label>标签色</label><input type="color" class="cat-label-color" data-idx="${idx}" value="${rd.labelColor||'#ffffff'}" />
+            <label>标签大小</label><input type="number" class="cat-label-scale" data-idx="${idx}" value="${rd.labelScale||0.8}" min="0.4" max="2" step="0.1" />
+            <button class="cat-del" data-idx="${idx}">×</button>`;
+        } else {
+          div.innerHTML = `
+            <select class="cat-val-select" data-idx="${idx}"><option value="${esc(rd.value)}">${esc(rd.value)}</option></select>
+            <label>形状</label><select class="cat-shape" data-idx="${idx}"><option value="sector"${rd.shape==='sector'?' selected':''}>扇形</option><option value="sword"${rd.shape==='sword'?' selected':''}>剑形</option><option value="triangle"${rd.shape==='triangle'?' selected':''}>三角形</option></select>
+            <label>角度</label><input type="number" class="cat-angle" data-idx="${idx}" value="${rd.angle||40}" min="0" max="90" step="5" />
+            <label>半径</label><input type="number" class="cat-radius" data-idx="${idx}" value="${rd.radius||80}" min="0" max="150" step="5" />
+            <span class="sep"></span>
+            <label>填充</label><input type="color" class="cat-fill-color" data-idx="${idx}" value="${rd.fillColor||'#7c8cf8'}" />
+            <label>边框</label><input type="color" class="cat-line-color" data-idx="${idx}" value="${rd.lineColor||'#f87171'}" />
+            <select class="cat-fill-style" data-idx="${idx}"><option value="solid"${rd.borderStyle==='solid'?' selected':''}>实线</option><option value="no-border"${rd.borderStyle==='no-border'?' selected':''}>无边框</option></select>
+            <label>透明</label><input type="number" class="cat-opacity" data-idx="${idx}" value="${rd.opacity||90}" min="0" max="100" step="5" />
+            <button class="cat-del" data-idx="${idx}">×</button>`;
+        }
         $('categoryStyles').appendChild(div);
         div.querySelector('.cat-del').onclick = () => div.remove();
       });

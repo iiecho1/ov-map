@@ -110,3 +110,35 @@ input[type="range"] {
 
 .mt-2 { margin-top: 8px; }
 .mt-3 { margin-top: 12px; }
+
+.layer-type-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.layer-type-opt {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  transition: all .2s;
+  user-select: none;
+}
+.layer-type-opt:hover { background: var(--accent-subtle); }
+.layer-type-opt.active {
+  background: var(--accent);
+  color: #fff;
+}
+.layer-type-opt input { display: none; }
+
+.cat-item.cat-point .cat-sector-only { display: none; }
+.cat-item.cat-sector .cat-point-only { display: none; }
