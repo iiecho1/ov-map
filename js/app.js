@@ -50,81 +50,193 @@ const CloudReader = {
 const Storage = {
     db: null,
     _initError: false,
+    _lsAvailable: true,
+    _lsLayersKey: 'ov-map-layers',
+    _lsStateKey: 'ov-map-state',
+
     async init() {
+        try {
+            localStorage.setItem('ov-map-storage-probe', '1');
+            localStorage.removeItem('ov-map-storage-probe');
+        } catch (e) {
+            this._lsAvailable = false;
+        }
         return new Promise(resolve => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            let settled = false;
+            const done = () => { if (!settled) { settled = true; resolve(); } };
+            let req;
+            try {
+                req = indexedDB.open(DB_NAME, DB_VERSION);
+            } catch (e) {
+                this._initError = true;
+                console.warn('Storage: IndexedDB open threw', e);
+                done();
+                return;
+            }
             req.onupgradeneeded = e => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains(STORE_LAYERS)) db.createObjectStore(STORE_LAYERS, { keyPath: 'id' });
                 if (!db.objectStoreNames.contains(STORE_STATE)) db.createObjectStore(STORE_STATE, { keyPath: 'key' });
             };
-            req.onsuccess = e => { this.db = e.target.result; resolve(); };
-            req.onerror = () => { this._initError = true; console.warn('Storage: IndexedDB unavailable'); resolve(); };
+            req.onsuccess = e => { this.db = e.target.result; done(); };
+            req.onerror = () => { this._initError = true; console.warn('Storage: IndexedDB unavailable, falling back to localStorage'); done(); };
+            req.onblocked = () => { this._initError = true; console.warn('Storage: IndexedDB blocked'); done(); };
+            setTimeout(() => { if (!this.db && !settled) { this._initError = true; console.warn('Storage: IndexedDB open timeout'); done(); } }, 3000);
         });
     },
-    saveLayer(id, data) {
-        if (!this.db) return Promise.resolve();
+
+    _normId(id) { return String(id); },
+
+    _readLsLayers() {
+        if (!this._lsAvailable) return {};
+        try { return JSON.parse(localStorage.getItem(this._lsLayersKey) || '{}') || {}; }
+        catch (e) { return {}; }
+    },
+    _writeLsLayers(map) {
+        if (!this._lsAvailable) return false;
+        try { localStorage.setItem(this._lsLayersKey, JSON.stringify(map)); return true; }
+        catch (e) { console.warn('Storage: localStorage layer write failed (quota?)', e); return false; }
+    },
+    _readLsState() {
+        if (!this._lsAvailable) return null;
+        try { return JSON.parse(localStorage.getItem(this._lsStateKey) || 'null'); }
+        catch (e) { return null; }
+    },
+    _writeLsState(state) {
+        if (!this._lsAvailable) return false;
+        try { localStorage.setItem(this._lsStateKey, JSON.stringify(state)); return true; }
+        catch (e) { return false; }
+    },
+
+    _idbPut(store, value) {
         return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
-            tx.onerror = () => { console.error('Storage: saveLayer failed', id); reject(tx.error); };
+            const tx = this.db.transaction(store, 'readwrite');
+            tx.onerror = () => reject(tx.error);
             tx.oncomplete = () => resolve();
-            tx.objectStore(STORE_LAYERS).put({ id, ...data });
+            tx.objectStore(store).put(value);
         });
     },
-    removeLayer(id) {
-        if (!this.db) return;
-        const del = (key) => {
-            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
-            tx.onerror = () => console.error('Storage: removeLayer failed', key);
-            tx.objectStore(STORE_LAYERS).delete(key);
-        };
-        del(id);
-        const nid = Number(id);
-        if (!isNaN(nid)) del(nid);
+    _idbDelete(store, key) {
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(store, 'readwrite');
+            tx.onerror = () => reject(tx.error);
+            tx.oncomplete = () => resolve();
+            tx.objectStore(store).delete(key);
+        });
     },
-    getLayer(id) {
-        if (!this.db) return Promise.resolve(null);
-        const doGet = (key) => new Promise(resolve => {
-            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).get(key);
+    _idbGet(store, key) {
+        return new Promise(resolve => {
+            const req = this.db.transaction(store, 'readonly').objectStore(store).get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => resolve(null);
         });
-        return doGet(id).then(result => {
-            if (result) return result;
-            const nid = Number(id);
-            if (!isNaN(nid)) return doGet(nid);
-            return null;
-        });
     },
-    getAllLayers() {
-        if (!this.db) return Promise.resolve([]);
+    _idbGetAll(store) {
         return new Promise(resolve => {
-            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).getAll();
+            const req = this.db.transaction(store, 'readonly').objectStore(store).getAll();
             req.onsuccess = () => resolve(req.result || []);
             req.onerror = () => resolve([]);
         });
     },
-    saveState(state) {
-        if (!this.db) return;
-        this.db.transaction(STORE_STATE, 'readwrite').objectStore(STORE_STATE).put({ key: 'mapState', ...state });
-    },
-    getState() {
-        if (!this.db) return Promise.resolve(null);
-        return new Promise(resolve => {
-            const req = this.db.transaction(STORE_STATE, 'readonly').objectStore(STORE_STATE).get('mapState');
-            req.onsuccess = () => resolve(req.result || null);
-            req.onerror = () => resolve(null);
-        });
-    },
-    clearAll() {
-        if (!this.db) return Promise.resolve();
+    _idbClear(store) {
         return new Promise((resolve, reject) => {
-            const tx = this.db.transaction([STORE_LAYERS, STORE_STATE], 'readwrite');
-            tx.objectStore(STORE_LAYERS).clear();
-            tx.objectStore(STORE_STATE).clear();
-            tx.oncomplete = () => resolve();
+            const tx = this.db.transaction(store, 'readwrite');
             tx.onerror = () => reject(tx.error);
+            tx.oncomplete = () => resolve();
+            tx.objectStore(store).clear();
         });
+    },
+
+    async saveLayer(id, data) {
+        const key = this._normId(id);
+        const record = { ...data, id: key };
+        let saved = false;
+        if (this.db) {
+            try {
+                await this._idbPut(STORE_LAYERS, record);
+                saved = true;
+            } catch (e) {
+                console.error('Storage: IndexedDB saveLayer failed', key, e);
+            }
+        }
+        const lsMap = this._readLsLayers();
+        lsMap[key] = record;
+        if (this._writeLsLayers(lsMap)) saved = true;
+        if (!saved) throw new Error('浏览器存储不可用，图层未能保存');
+        return record;
+    },
+
+    async removeLayer(id) {
+        const key = this._normId(id);
+        if (this.db) {
+            try { await this._idbDelete(STORE_LAYERS, key); } catch (e) { console.error('Storage: removeLayer idb failed', key, e); }
+            const nid = Number(key);
+            if (!isNaN(nid)) { try { await this._idbDelete(STORE_LAYERS, nid); } catch (e) {} }
+        }
+        const lsMap = this._readLsLayers();
+        if (key in lsMap) { delete lsMap[key]; this._writeLsLayers(lsMap); }
+    },
+
+    async getLayer(id) {
+        const key = this._normId(id);
+        let result = null;
+        if (this.db) {
+            result = await this._idbGet(STORE_LAYERS, key);
+            if (!result) {
+                const nid = Number(key);
+                if (!isNaN(nid)) result = await this._idbGet(STORE_LAYERS, nid);
+            }
+        }
+        if (result) return { ...result, id: key };
+        const lsMap = this._readLsLayers();
+        if (lsMap[key]) return { ...lsMap[key], id: key };
+        return null;
+    },
+
+    async getAllLayers() {
+        const byId = {};
+        const lsMap = this._readLsLayers();
+        for (const [k, v] of Object.entries(lsMap)) {
+            if (v && typeof v === 'object') byId[String(v.id ?? k)] = { ...v, id: String(v.id ?? k) };
+        }
+        if (this.db) {
+            const rows = await this._idbGetAll(STORE_LAYERS);
+            for (const r of rows) {
+                if (!r) continue;
+                const key = this._normId(r.id);
+                byId[key] = { ...r, id: key };
+            }
+        }
+        return Object.values(byId);
+    },
+
+    async saveState(state) {
+        const record = { ...state, key: 'mapState' };
+        if (this.db) {
+            try { await this._idbPut(STORE_STATE, record); } catch (e) { console.error('Storage: saveState idb failed', e); }
+        }
+        this._writeLsState(state);
+    },
+
+    async getState() {
+        let result = null;
+        if (this.db) result = await this._idbGet(STORE_STATE, 'mapState');
+        if (result) return result;
+        return this._readLsState();
+    },
+
+    async clearAll() {
+        if (this.db) {
+            try { await this._idbClear(STORE_LAYERS); } catch (e) {}
+            try { await this._idbClear(STORE_STATE); } catch (e) {}
+        }
+        if (this._lsAvailable) {
+            try { localStorage.removeItem(this._lsLayersKey); localStorage.removeItem(this._lsStateKey); } catch (e) {}
+        }
+    },
+
+    isPersistent() {
+        return !!(this.db || this._lsAvailable);
     }
 };
 
@@ -274,8 +386,12 @@ const App = {
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
-            if (Storage._initError || CloudReader._initError) {
-                console.warn('Storage warning: Local persistence may be unavailable');
+            await this.loadCloudLayers(true);
+            if (!Storage.isPersistent()) {
+                console.warn('Storage warning: Local persistence unavailable');
+                setTimeout(() => alert('浏览器存储不可用，导入的图层将无法跨会话保存。\n请通过 http://localhost:8080 访问（不要直接双击打开 HTML），并允许网站保存数据。'), 500);
+            } else if (Storage._initError || CloudReader._initError) {
+                console.warn('Storage warning: IndexedDB unavailable, using localStorage fallback');
             }
         } catch (e) {
             console.error('Init failed:', e);
@@ -1097,9 +1213,11 @@ const App = {
         this.showLoading(`并行加载 ${total} 个图层 (0/${total})...`);
         const tasks = saved.map(item => async () => {
             try {
-                await this.renderLayerAsync(item.text, item.ext, item.name, item.id, item.colorIndex);
+                const layerId = String(item.id);
+                const ci = Number.isFinite(item.colorIndex) ? item.colorIndex : this.colorIndex++;
+                await this.renderLayerAsync(item.text, item.ext, item.name, layerId, ci);
                 if (item.visible === false) {
-                    const d = this.importedLayers[item.id];
+                    const d = this.importedLayers[layerId];
                     if (d) { this.map.removeLayer(d.layer); d.visible = false; }
                 }
             } catch (e) { console.error('restore failed:', item.name, e); }
@@ -1112,7 +1230,7 @@ const App = {
         this.updateLabelOverlay();
     },
 
-    async loadCloudLayers() {
+    async loadCloudLayers(auto = false) {
         const files = await CloudReader.getEnabledFiles();
         if (!files.length) return;
         const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
@@ -1123,14 +1241,15 @@ const App = {
         this.showLoading(`并行加载 ${total} 个云端图层 (0/${total})...`);
         const tasks = newFiles.map((f, i) => async () => {
             try {
-                const layerId = 'cloud_' + Date.now() + '_' + i;
+                const layerId = 'cloud_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6);
                 const ci = this.colorIndex++;
                 const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
                 if (layer) {
-                    if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                    if (!auto && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
                     this.importedLayers[layerId]._cloud = true;
                     this._layerOrder = this._layerOrder || [];
                     this._layerOrder.push(layerId);
+                    await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci, visible: true });
                 }
             } catch (e) { console.error('cloud layer load failed:', f.name, e); }
             done++;
@@ -1383,7 +1502,7 @@ const App = {
                 layer.openPopup();
             }
         });
-        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
+        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci, _text: text };
         this._buildSearchIndex(layerId);
         return group;
     },
@@ -1404,12 +1523,16 @@ const App = {
         try {
             this.showLoading('读取文件...');
             const text = await file.text();
-            const layerId = Date.now();
+            const layerId = 'lyr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
-            if (!layer) return;
+            if (!layer) {
+                this.hideLoading();
+                alert('无法识别的文件格式，请导入 KML / GeoJSON / GPX');
+                return;
+            }
             if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
             this.showLoading('保存...');
-            await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci });
+            await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci, visible: true });
             this.updateImportedLayersList();
             this.debouncedSave();
             this.updateLabelOverlay();
@@ -1628,8 +1751,16 @@ const App = {
             d._nameInverted = null;
             d._descInverted = null;
             el.textContent = newName;
-            const saved = await Storage.getLayer(id);
-            if (saved) await Storage.saveLayer(id, { ...saved, name: d.name });
+            try {
+                const saved = await Storage.getLayer(id);
+                await Storage.saveLayer(id, {
+                    name: d.name,
+                    ext: (saved && saved.ext) || d.ext || 'kml',
+                    text: (saved && saved.text) || d._text || '',
+                    colorIndex: (saved && saved.colorIndex) ?? d.colorIndex ?? 0,
+                    visible: (saved && saved.visible) !== false
+                });
+            } catch (e) { console.error('rename save failed:', id, e); }
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -1644,7 +1775,13 @@ const App = {
             this.updateLabelOverlay();
             try {
                 const saved = await Storage.getLayer(id);
-                if (saved) await Storage.saveLayer(id, { ...saved, visible: vis });
+                await Storage.saveLayer(id, {
+                    name: d.name,
+                    ext: (saved && saved.ext) || d.ext || 'kml',
+                    text: (saved && saved.text) || d._text || '',
+                    colorIndex: (saved && saved.colorIndex) ?? d.colorIndex ?? 0,
+                    visible: vis
+                });
             } catch (e) { console.error('toggleLayer save failed:', id, e); }
         }
     },
@@ -1915,13 +2052,13 @@ const App = {
 
         for (const f of files) {
             try {
-                const layerId = 'cloud_' + Date.now() + '_' + done;
+                const layerId = 'cloud_' + Date.now() + '_' + done + '_' + Math.random().toString(36).slice(2, 6);
                 const ci = this.colorIndex++;
                 const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
                 if (layer && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
                 this._layerOrder = this._layerOrder || [];
                 this._layerOrder.push(layerId);
-                await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci });
+                await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci, visible: true });
             } catch (e) { console.error('同步失败:', f.name, e); }
             done++;
             this.showLoading(`正在同步 (${done}/${total})...`);
