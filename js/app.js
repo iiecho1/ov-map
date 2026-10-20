@@ -416,7 +416,6 @@ const App = {
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
-            await this.loadCloudLayers(true);
             if (!Storage.isPersistent()) {
                 console.warn('Storage warning: Local persistence unavailable');
                 setTimeout(() => alert('浏览器存储不可用，导入的图层将无法跨会话保存。\n请通过 http://localhost:8080 访问（不要直接双击打开 HTML），并允许网站保存数据。'), 500);
@@ -1246,8 +1245,6 @@ const App = {
                 const layerId = String(item.id);
                 const ci = Number.isFinite(item.colorIndex) ? item.colorIndex : this.colorIndex++;
                 await this.renderLayerAsync(item.text, (item.ext || 'kml').toLowerCase(), item.name, layerId, ci);
-                const dRestored = this.importedLayers[layerId];
-                if (dRestored && (item.cloudId || layerId.startsWith('cloud_'))) dRestored._cloud = true;
                 if (item.visible === false) {
                     const d = this.importedLayers[layerId];
                     if (d) { this.map.removeLayer(d.layer); d.visible = false; }
@@ -1260,39 +1257,6 @@ const App = {
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
-    },
-
-    async loadCloudLayers(auto = false) {
-        const files = await CloudReader.getEnabledFiles();
-        if (!files.length) return;
-        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
-        const existingIds = new Set(Object.keys(this.importedLayers));
-        const newFiles = files.filter(f => !existingNames.has(f.name) && !existingIds.has(String(f.id)));
-        if (!newFiles.length) return;
-        const total = newFiles.length;
-        let done = 0;
-        this.showLoading(`并行加载 ${total} 个云端图层 (0/${total})...`);
-        const tasks = newFiles.map((f, i) => async () => {
-            try {
-                const layerId = String(f.id || ('cloud_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6)));
-                const ci = this.colorIndex++;
-                const layer = await this.renderLayerAsync(f.text, (f.ext || 'kml').toLowerCase(), f.name, layerId, ci);
-                if (layer) {
-                    if (!auto && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
-                    this.importedLayers[layerId]._cloud = true;
-                    this._layerOrder = this._layerOrder || [];
-                    if (!this._layerOrder.includes(layerId)) this._layerOrder.push(layerId);
-                    await Storage.saveLayer(layerId, { name: f.name, ext: (f.ext || 'kml').toLowerCase(), text: f.text, colorIndex: ci, visible: true });
-                }
-            } catch (e) { console.error('cloud layer load failed:', f.name, e); }
-            done++;
-            this.showLoading(`并行加载云端图层 (${done}/${total})...`);
-        });
-        await this._runConcurrent(tasks, 8);
-        this.hideLoading();
-        this.updateImportedLayersList();
-        this.updateLabelOverlay();
-        this.debouncedSave();
     },
 
     switchBaseLayer(n) {
@@ -1601,14 +1565,13 @@ const App = {
             div.className = 'layer-item';
             div.draggable = true;
             div.dataset.id = id;
-            const cloudIcon = d._cloud ? '&#9729; ' : '';
             const checkedAttr = d.visible !== false ? 'checked' : '';
             const moveUpDisabled = i === 0 ? 'disabled' : '';
             const moveDownDisabled = i === orderLen - 1 ? 'disabled' : '';
             div.innerHTML = `<input type="checkbox" ${checkedAttr} onchange="App.toggleLayer('${id}',this.checked)">
                 <span class="layer-color-indicator" style="background:${d.color}"></span>
                 <div class="layer-item-info">
-                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${cloudIcon}${this.escH(d.name)}</span>
+                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${this.escH(d.name)}</span>
                     <div class="layer-actions">
                         <button title="上移" onclick="App.moveLayer('${id}',-1)" ${moveUpDisabled}>&#9650;</button>
                         <button title="下移" onclick="App.moveLayer('${id}',1)" ${moveDownDisabled}>&#9660;</button>
@@ -1878,14 +1841,6 @@ const App = {
             if (d._nameInverted) d._nameInverted = null;
             if (d._descInverted) d._descInverted = null;
             await Storage.removeLayer(id);
-            // 同步禁用浏览器云端缓存，避免刷新后 loadCloudLayers 再次自动加载
-            try {
-                const files = await CloudReader.getAllFiles();
-                const hit = files.find(f => String(f.id) === String(id) || f.name === d.name);
-                if (hit && hit.enabled !== false) {
-                    await CloudReader.save({ ...hit, enabled: false, updatedAt: Date.now() });
-                }
-            } catch (e) { /* CloudReader 不可用时忽略 */ }
             this.updateImportedLayersList();
             this.updateLabelOverlay();
         }
@@ -2054,11 +2009,12 @@ const App = {
         }).join('') + '</div>';
     },
 
+    // 从云端下载文件并保存为本地图层（与文件导入等价）
     async syncSelectedCloudFiles() {
         const activeTab = this._cloudTab;
         const containerId = activeTab === 'cloud' ? 'cloudRemoteFileList' : 'cloudLocalFileList';
         const checks = document.querySelectorAll('#' + containerId + ' input[type="checkbox"]:checked:not(:disabled)');
-        if (!checks.length) { alert('请选择要同步的图层'); return; }
+        if (!checks.length) { alert('请选择要导入的图层'); return; }
 
         this.showLoading('正在获取图层...');
         this.closeCloudSync();
@@ -2088,7 +2044,7 @@ const App = {
         const total = files.length;
         let done = 0;
         let failed = 0;
-        this.showLoading(`正在同步 (0/${total})...`);
+        this.showLoading(`正在导入 (0/${total})...`);
 
         await new Promise(r => setTimeout(r, 50));
 
@@ -2097,34 +2053,19 @@ const App = {
                 const text = f.text == null ? '' : String(f.text);
                 if (!text) throw new Error('文件内容为空');
                 const ext = (f.ext || 'kml').toLowerCase();
-                const layerId = String(f.id || ('cloud_' + Date.now() + '_' + done + '_' + Math.random().toString(36).slice(2, 6)));
+                const fileName = f.name || ('cloud_' + Date.now());
                 const ci = this.colorIndex++;
-                const layer = await this.renderLayerAsync(text, ext, f.name, layerId, ci);
+                const layerId = 'lyr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci);
                 if (!layer) throw new Error('无法识别的文件格式');
                 if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
-                if (this.importedLayers[layerId]) this.importedLayers[layerId]._cloud = true;
-                this._layerOrder = this._layerOrder || [];
-                if (!this._layerOrder.includes(layerId)) this._layerOrder.push(layerId);
-                // 先缓存到浏览器云端库（刷新后 loadCloudLayers 兜底），再写持久化图层
-                try {
-                    await CloudReader.save({
-                        id: f.id || layerId,
-                        name: f.name,
-                        text,
-                        ext,
-                        size: text.length,
-                        enabled: true,
-                        createdAt: f.createdAt || Date.now(),
-                        updatedAt: Date.now()
-                    });
-                } catch (ce) { console.warn('云端文件缓存到浏览器失败:', f.name, ce); }
-                await Storage.saveLayer(layerId, { name: f.name, ext, text, colorIndex: ci, visible: true, cloudId: f.id || null });
+                await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci, visible: true });
             } catch (e) {
-                console.error('同步失败:', f.name, e);
+                console.error('导入失败:', f.name, e);
                 failed++;
             }
             done++;
-            this.showLoading(`正在同步 (${done}/${total})...`);
+            this.showLoading(`正在导入 (${done}/${total})...`);
         }
 
         this.hideLoading();
@@ -2132,7 +2073,7 @@ const App = {
         this.updateLabelOverlay();
         this.debouncedSave();
         if (failed) {
-            alert(`${failed}/${total} 个图层保存失败，刷新后可能丢失。\n请检查浏览器存储权限，或通过 http://localhost:8080 访问。`);
+            alert(`${failed}/${total} 个图层导入失败，请检查浏览器存储权限，或通过 http://localhost:8080 访问。`);
         }
     },
 
