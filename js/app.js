@@ -50,305 +50,129 @@ const CloudReader = {
 const Storage = {
     db: null,
     _initError: false,
-    _lsAvailable: true,
-    _lsLayersKey: 'ov-map-layers',
-    _lsStateKey: 'ov-map-state',
-
     async init() {
-        try {
-            localStorage.setItem('ov-map-storage-probe', '1');
-            localStorage.removeItem('ov-map-storage-probe');
-        } catch (e) {
-            this._lsAvailable = false;
-        }
         return new Promise(resolve => {
-            let settled = false;
-            const done = () => { if (!settled) { settled = true; resolve(); } };
-            let req;
-            try {
-                req = indexedDB.open(DB_NAME, DB_VERSION);
-            } catch (e) {
-                this._initError = true;
-                console.warn('Storage: IndexedDB open threw', e);
-                done();
-                return;
-            }
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
             req.onupgradeneeded = e => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains(STORE_LAYERS)) db.createObjectStore(STORE_LAYERS, { keyPath: 'id' });
                 if (!db.objectStoreNames.contains(STORE_STATE)) db.createObjectStore(STORE_STATE, { keyPath: 'key' });
             };
-            req.onsuccess = e => { this.db = e.target.result; done(); };
-            req.onerror = () => { this._initError = true; console.warn('Storage: IndexedDB unavailable, falling back to localStorage'); done(); };
-            req.onblocked = () => { this._initError = true; console.warn('Storage: IndexedDB blocked'); done(); };
-            setTimeout(() => { if (!this.db && !settled) { this._initError = true; console.warn('Storage: IndexedDB open timeout'); done(); } }, 3000);
+            req.onsuccess = e => { this.db = e.target.result; resolve(); };
+            req.onerror = () => { this._initError = true; console.warn('Storage: IndexedDB unavailable'); resolve(); };
         });
     },
-
-    _normId(id) { return String(id); },
-
-    _readLsLayers() {
-        if (!this._lsAvailable) return {};
-        try { return JSON.parse(localStorage.getItem(this._lsLayersKey) || '{}') || {}; }
-        catch (e) { return {}; }
-    },
-    _writeLsLayers(map) {
-        if (!this._lsAvailable) return false;
-        try { localStorage.setItem(this._lsLayersKey, JSON.stringify(map)); return true; }
-        catch (e) { console.warn('Storage: localStorage layer write failed (quota?)', e); return false; }
-    },
-    _readLsState() {
-        if (!this._lsAvailable) return null;
-        try { return JSON.parse(localStorage.getItem(this._lsStateKey) || 'null'); }
-        catch (e) { return null; }
-    },
-    _writeLsState(state) {
-        if (!this._lsAvailable) return false;
-        try { localStorage.setItem(this._lsStateKey, JSON.stringify(state)); return true; }
-        catch (e) { return false; }
-    },
-
-    _idbPut(store, value) {
+    saveLayer(id, data) {
+        if (!this.db) return Promise.resolve();
         return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            tx.onerror = () => reject(tx.error);
+            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+            tx.onerror = () => { console.error('Storage: saveLayer failed', id); reject(tx.error); };
             tx.oncomplete = () => resolve();
-            tx.objectStore(store).put(value);
+            tx.objectStore(STORE_LAYERS).put({ id, ...data });
         });
     },
-    _idbDelete(store, key) {
-        return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            tx.onerror = () => reject(tx.error);
-            tx.oncomplete = () => resolve();
-            tx.objectStore(store).delete(key);
-        });
+    removeLayer(id) {
+        if (!this.db) return;
+        const del = (key) => {
+            const tx = this.db.transaction(STORE_LAYERS, 'readwrite');
+            tx.onerror = () => console.error('Storage: removeLayer failed', key);
+            tx.objectStore(STORE_LAYERS).delete(key);
+        };
+        del(id);
+        const nid = Number(id);
+        if (!isNaN(nid)) del(nid);
     },
-    _idbGet(store, key) {
-        return new Promise(resolve => {
-            const req = this.db.transaction(store, 'readonly').objectStore(store).get(key);
+    getLayer(id) {
+        if (!this.db) return Promise.resolve(null);
+        const doGet = (key) => new Promise(resolve => {
+            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => resolve(null);
         });
+        return doGet(id).then(result => {
+            if (result) return result;
+            const nid = Number(id);
+            if (!isNaN(nid)) return doGet(nid);
+            return null;
+        });
     },
-    _idbGetAll(store) {
+    getAllLayers() {
+        if (!this.db) return Promise.resolve([]);
         return new Promise(resolve => {
-            const req = this.db.transaction(store, 'readonly').objectStore(store).getAll();
+            const req = this.db.transaction(STORE_LAYERS, 'readonly').objectStore(STORE_LAYERS).getAll();
             req.onsuccess = () => resolve(req.result || []);
             req.onerror = () => resolve([]);
         });
     },
-    _idbClear(store) {
-        return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(store, 'readwrite');
-            tx.onerror = () => reject(tx.error);
-            tx.oncomplete = () => resolve();
-            tx.objectStore(store).clear();
+    saveState(state) {
+        if (!this.db) return;
+        this.db.transaction(STORE_STATE, 'readwrite').objectStore(STORE_STATE).put({ key: 'mapState', ...state });
+    },
+    getState() {
+        if (!this.db) return Promise.resolve(null);
+        return new Promise(resolve => {
+            const req = this.db.transaction(STORE_STATE, 'readonly').objectStore(STORE_STATE).get('mapState');
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
         });
     },
-
-    // localStorage 读-改-写串行化，避免并发 saveLayer 互相覆盖
-    _lsWriteQueue: Promise.resolve(),
-    _queueLsWrite(key, record) {
-        const run = async () => {
-            const lsMap = this._readLsLayers();
-            if (record === null) delete lsMap[key];
-            else lsMap[key] = record;
-            return this._writeLsLayers(lsMap);
-        };
-        const p = this._lsWriteQueue.then(run, run);
-        this._lsWriteQueue = p.then(() => {}, () => {});
-        return p;
-    },
-
-    async saveLayer(id, data) {
-        const key = this._normId(id);
-        const ext = (data.ext || 'kml').toLowerCase();
-        const record = { ...data, ext, id: key };
-        // 文本一律归一为字符串，避免 undefined 导致恢复时解析失败
-        if (record.text == null) record.text = '';
-        else record.text = String(record.text);
-        let saved = false;
-        if (this.db) {
-            try {
-                await this._idbPut(STORE_LAYERS, record);
-                saved = true;
-            } catch (e) {
-                console.error('Storage: IndexedDB saveLayer failed', key, e);
-            }
-        }
-        // 大文本（>512KB）不写 localStorage：5MB 配额必爆，且会拖垮整份图层映射
-        // IndexedDB 是主存储；localStorage 仅作小图层/降级缓存
-        if (record.text.length <= 512 * 1024) {
-            try {
-                if (await this._queueLsWrite(key, record)) saved = true;
-            } catch (e) {
-                console.warn('Storage: localStorage layer write failed', key, e);
-            }
-        } else if (!this.db) {
-            // 无 IndexedDB 时仍尝试写入 localStorage，失败则如实抛错
-            try {
-                if (await this._queueLsWrite(key, record)) saved = true;
-            } catch (e) {
-                console.warn('Storage: localStorage large layer write failed', key, e);
-            }
-        }
-        if (!saved) throw new Error('浏览器存储不可用，图层未能保存');
-        return record;
-    },
-
-    async removeLayer(id) {
-        const key = this._normId(id);
-        if (this.db) {
-            try { await this._idbDelete(STORE_LAYERS, key); } catch (e) { console.error('Storage: removeLayer idb failed', key, e); }
-            const nid = Number(key);
-            if (!isNaN(nid)) { try { await this._idbDelete(STORE_LAYERS, nid); } catch (e) {} }
-        }
-        try { await this._queueLsWrite(key, null); } catch (e) {}
-    },
-
-    async getLayer(id) {
-        const key = this._normId(id);
-        let result = null;
-        if (this.db) {
-            result = await this._idbGet(STORE_LAYERS, key);
-            if (!result) {
-                const nid = Number(key);
-                if (!isNaN(nid)) result = await this._idbGet(STORE_LAYERS, nid);
-            }
-        }
-        if (result) return { ...result, id: key };
-        const lsMap = this._readLsLayers();
-        if (lsMap[key]) return { ...lsMap[key], id: key };
-        return null;
-    },
-
-    async getAllLayers() {
-        const byId = {};
-        const lsMap = this._readLsLayers();
-        for (const [k, v] of Object.entries(lsMap)) {
-            if (v && typeof v === 'object') byId[String(v.id ?? k)] = { ...v, id: String(v.id ?? k) };
-        }
-        if (this.db) {
-            const rows = await this._idbGetAll(STORE_LAYERS);
-            for (const r of rows) {
-                if (!r) continue;
-                const key = this._normId(r.id);
-                byId[key] = { ...r, id: key };
-            }
-        }
-        return Object.values(byId);
-    },
-
-    async saveState(state) {
-        const record = { ...state, key: 'mapState' };
-        if (this.db) {
-            try { await this._idbPut(STORE_STATE, record); } catch (e) { console.error('Storage: saveState idb failed', e); }
-        }
-        this._writeLsState(state);
-    },
-
-    async getState() {
-        let result = null;
-        if (this.db) result = await this._idbGet(STORE_STATE, 'mapState');
-        if (result) return result;
-        return this._readLsState();
-    },
-
-    async clearAll() {
-        if (this.db) {
-            try { await this._idbClear(STORE_LAYERS); } catch (e) {}
-            try { await this._idbClear(STORE_STATE); } catch (e) {}
-        }
-        if (this._lsAvailable) {
-            try { localStorage.removeItem(this._lsLayersKey); localStorage.removeItem(this._lsStateKey); } catch (e) {}
-        }
-    },
-
-    isPersistent() {
-        return !!(this.db || this._lsAvailable);
+    clearAll() {
+        if (!this.db) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([STORE_LAYERS, STORE_STATE], 'readwrite');
+            tx.objectStore(STORE_LAYERS).clear();
+            tx.objectStore(STORE_STATE).clear();
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
     }
 };
 
-const GCJ_PI = Math.PI;
-const GCJ_A = 6378245.0;
-const GCJ_EE = 0.00669342162296594323;
-const GCJ_D2R = Math.PI / 180;
-const GCJ_R2D = 180 / Math.PI;
-const MERC_R = 6378137;
-const MERC_D = Math.PI / 180;
-const MERC_MAX_LAT = 85.0511287798;
-
-function gcjTransformLat(x, y) {
-    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
-    ret += (20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0 / 3.0;
-    ret += (20.0 * Math.sin(y * GCJ_PI) + 40.0 * Math.sin(y / 3.0 * GCJ_PI)) * 2.0 / 3.0;
-    ret += (160.0 * Math.sin(y / 12.0 * GCJ_PI) + 320 * Math.sin(y * GCJ_PI / 30.0)) * 2.0 / 3.0;
-    return ret;
-}
-
-function gcjTransformLng(x, y) {
-    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
-    ret += (20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0 / 3.0;
-    ret += (20.0 * Math.sin(x * GCJ_PI) + 40.0 * Math.sin(x / 3.0 * GCJ_PI)) * 2.0 / 3.0;
-    ret += (150.0 * Math.sin(x / 12.0 * GCJ_PI) + 300.0 * Math.sin(x / 30.0 * GCJ_PI)) * 2.0 / 3.0;
-    return ret;
-}
-
-function gcjDelta(lat, lng) {
-    let dLat = gcjTransformLat(lng - 105.0, lat - 35.0);
-    let dLng = gcjTransformLng(lng - 105.0, lat - 35.0);
-    const radLat = lat * GCJ_D2R;
-    let magic = Math.sin(radLat);
-    magic = 1 - GCJ_EE * magic * magic;
-    const sqrtMagic = Math.sqrt(magic);
-    dLat = (dLat * 180.0) / ((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic) * GCJ_PI);
-    dLng = (dLng * 180.0) / (GCJ_A / sqrtMagic * Math.cos(radLat) * GCJ_PI);
-    return { dLat, dLng };
-}
-
-const _gcjCache = new Map();
-const GCJ_CACHE_MAX = 8192;
-
-function gcjDeltaCached(lat, lng) {
-    const key = ((lat * 1e6) | 0) + ':' + ((lng * 1e6) | 0);
-    let hit = _gcjCache.get(key);
-    if (hit !== undefined) return hit;
-    hit = gcjDelta(lat, lng);
-    if (_gcjCache.size >= GCJ_CACHE_MAX) _gcjCache.clear();
-    _gcjCache.set(key, hit);
-    return hit;
-}
-
 L.GCJ02 = {
-    wgs84ToGcj02(lat, lng) {
-        const t = gcjDeltaCached(lat, lng);
-        return { lat: lat + t.dLat, lng: lng + t.dLng };
+    _PI: Math.PI,
+    _a: 6378245.0,
+    _ee: 0.00669342162296594323,
+    _transform(lat, lng) {
+        let dLat = this._transformLat(lng - 105.0, lat - 35.0);
+        let dLng = this._transformLng(lng - 105.0, lat - 35.0);
+        const radLat = lat / 180.0 * this._PI;
+        let magic = Math.sin(radLat);
+        magic = 1 - this._ee * magic * magic;
+        const sqrtMagic = Math.sqrt(magic);
+        dLat = (dLat * 180.0) / ((this._a * (1 - this._ee)) / (magic * sqrtMagic) * this._PI);
+        dLng = (dLng * 180.0) / (this._a / sqrtMagic * Math.cos(radLat) * this._PI);
+        return { lat: lat + dLat, lng: lng + dLng };
     },
+    _transformLat(x, y) {
+        let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(y * this._PI) + 40.0 * Math.sin(y / 3.0 * this._PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(y / 12.0 * this._PI) + 320 * Math.sin(y * this._PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    },
+    _transformLng(x, y) {
+        let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this._PI) + 20.0 * Math.sin(2.0 * x * this._PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(x * this._PI) + 40.0 * Math.sin(x / 3.0 * this._PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(x / 12.0 * this._PI) + 300.0 * Math.sin(x / 30.0 * this._PI)) * 2.0 / 3.0;
+        return ret;
+    },
+    wgs84ToGcj02(lat, lng) { return this._transform(lat, lng); },
     gcj02ToWgs84(lat, lng) {
-        const t = gcjDeltaCached(lat, lng);
-        return { lat: lat - t.dLat, lng: lng - t.dLng };
+        const t = this._transform(lat, lng);
+        return { lat: lat * 2 - t.lat, lng: lng * 2 - t.lng };
     }
 };
 
 L.Projection.GCJ02Mercator = L.extend({}, L.Projection.SphericalMercator, {
     project(latlng) {
-        const t = gcjDeltaCached(latlng.lat, latlng.lng);
-        let lat = latlng.lat + t.dLat;
-        if (lat > MERC_MAX_LAT) lat = MERC_MAX_LAT;
-        else if (lat < -MERC_MAX_LAT) lat = -MERC_MAX_LAT;
-        const sin = Math.sin(lat * MERC_D);
-        const lng = (latlng.lng + t.dLng) * MERC_D;
-        return new L.Point(
-            MERC_R * lng,
-            MERC_R * Math.log((1 + sin) / (1 - sin)) / 2
-        );
+        const gcj = L.GCJ02.wgs84ToGcj02(latlng.lat, latlng.lng);
+        return L.Projection.SphericalMercator.project(new L.LatLng(gcj.lat, gcj.lng));
     },
     unproject(point) {
-        const lat = (2 * Math.atan(Math.exp(point.y / MERC_R)) - (Math.PI / 2)) * GCJ_R2D;
-        const lng = point.x / MERC_R * GCJ_R2D;
-        const t = gcjDeltaCached(lat, lng);
-        return new L.LatLng(lat - t.dLat, lng - t.dLng);
+        const gcjLatLng = L.Projection.SphericalMercator.unproject(point);
+        const wgs = L.GCJ02.gcj02ToWgs84(gcjLatLng.lat, gcjLatLng.lng);
+        return new L.LatLng(wgs.lat, wgs.lng);
     }
 });
 
@@ -416,11 +240,8 @@ const App = {
             this.initLabelOverlay();
             this.initEventListeners();
             await Promise.all([this.restoreState(), this.restoreLayers()]);
-            if (!Storage.isPersistent()) {
-                console.warn('Storage warning: Local persistence unavailable');
-                setTimeout(() => alert('浏览器存储不可用，导入的图层将无法跨会话保存。\n请通过 http://localhost:8080 访问（不要直接双击打开 HTML），并允许网站保存数据。'), 500);
-            } else if (Storage._initError || CloudReader._initError) {
-                console.warn('Storage warning: IndexedDB unavailable, using localStorage fallback');
+            if (Storage._initError || CloudReader._initError) {
+                console.warn('Storage warning: Local persistence may be unavailable');
             }
         } catch (e) {
             console.error('Init failed:', e);
@@ -429,7 +250,7 @@ const App = {
     },
 
     initMap() {
-        this.canvasRenderer = L.canvas({ padding: 0.4 });
+        this.canvasRenderer = L.canvas({ padding: 0.1 });
         this.map = L.map('map', {
             center: [35.8617, 104.1954], zoom: 5, zoomControl: true,
             preferCanvas: true, renderer: this.canvasRenderer
@@ -502,37 +323,15 @@ const App = {
                 const pad = 100;
                 const items = App._getFlatLabelCache();
                 const grid = App._getLabelSpatialIndex(items, GRID_SIZE, filterBounds);
-                const maxLabels = 350;
-                const cell = 64;
-                const cols = ((size.x / cell) | 0) + 3;
-                const rows = ((size.y / cell) | 0) + 3;
-                let occupied = this._occupied;
-                if (!occupied || occupied.length < cols * rows) {
-                    occupied = this._occupied = new Uint8Array(cols * rows);
-                } else {
-                    occupied.fill(0);
-                }
-                let drawn = 0;
+                ctx.beginPath();
                 for (let k = 0; k < grid.length; k++) {
-                    if (drawn >= maxLabels) break;
                     const item = grid[k];
                     const pt = map.latLngToContainerPoint(item._c);
                     if (pt.x < -pad || pt.y < -pad || pt.x > size.x + pad || pt.y > size.y + pad) continue;
-                    const cx = ((pt.x / cell) | 0) + 1;
-                    const cy = ((pt.y / cell) | 0) + 1;
-                    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
-                    const span = item.text.length > 6 ? 3 : item.text.length > 3 ? 2 : 1;
-                    let blocked = false;
-                    const maxSx = Math.min(span, cols - cx);
-                    for (let sx = 0; sx < maxSx; sx++) {
-                        if (occupied[cy * cols + cx + sx]) { blocked = true; break; }
-                    }
-                    if (blocked) continue;
-                    for (let sx = 0; sx < maxSx; sx++) occupied[cy * cols + cx + sx] = 1;
                     ctx.strokeText(item.text, pt.x, pt.y);
                     ctx.fillText(item.text, pt.x, pt.y);
-                    drawn++;
                 }
+                ctx.stroke();
             }
         });
         this.labelOverlay = new Overlay();
@@ -1194,12 +993,7 @@ const App = {
             this._cursorRaf = requestAnimationFrame(() => {
                 this._cursorRaf = null;
                 const ev = this._cursorLatest;
-                if (!ev) return;
-                const text = `经度: ${ev.latlng.lng.toFixed(6)}, 纬度: ${ev.latlng.lat.toFixed(6)}`;
-                if (text !== this._cursorText) {
-                    this._cursorText = text;
-                    this._dom.cursorPos.textContent = text;
-                }
+                if (ev) this._dom.cursorPos.textContent = `经度: ${ev.latlng.lng.toFixed(6)}, 纬度: ${ev.latlng.lat.toFixed(6)}`;
             });
         });
         this.map.on('zoomend', () => { this._dom.zoomLevel.textContent = `缩放级别: ${this.map.getZoom()}`; this.debouncedSave(); });
@@ -1242,11 +1036,9 @@ const App = {
         this.showLoading(`并行加载 ${total} 个图层 (0/${total})...`);
         const tasks = saved.map(item => async () => {
             try {
-                const layerId = String(item.id);
-                const ci = Number.isFinite(item.colorIndex) ? item.colorIndex : this.colorIndex++;
-                await this.renderLayerAsync(item.text, (item.ext || 'kml').toLowerCase(), item.name, layerId, ci);
+                await this.renderLayerAsync(item.text, item.ext, item.name, item.id, item.colorIndex);
                 if (item.visible === false) {
-                    const d = this.importedLayers[layerId];
+                    const d = this.importedLayers[item.id];
                     if (d) { this.map.removeLayer(d.layer); d.visible = false; }
                 }
             } catch (e) { console.error('restore failed:', item.name, e); }
@@ -1257,6 +1049,37 @@ const App = {
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
+    },
+
+    async loadCloudLayers() {
+        const files = await CloudReader.getEnabledFiles();
+        if (!files.length) return;
+        const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
+        const newFiles = files.filter(f => !existingNames.has(f.name));
+        if (!newFiles.length) return;
+        const total = newFiles.length;
+        let done = 0;
+        this.showLoading(`并行加载 ${total} 个云端图层 (0/${total})...`);
+        const tasks = newFiles.map((f, i) => async () => {
+            try {
+                const layerId = 'cloud_' + Date.now() + '_' + i;
+                const ci = this.colorIndex++;
+                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
+                if (layer) {
+                    if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                    this.importedLayers[layerId]._cloud = true;
+                    this._layerOrder = this._layerOrder || [];
+                    this._layerOrder.push(layerId);
+                }
+            } catch (e) { console.error('cloud layer load failed:', f.name, e); }
+            done++;
+            this.showLoading(`并行加载云端图层 (${done}/${total})...`);
+        });
+        await this._runConcurrent(tasks, 8);
+        this.hideLoading();
+        this.updateImportedLayersList();
+        this.updateLabelOverlay();
+        this.debouncedSave();
     },
 
     switchBaseLayer(n) {
@@ -1459,13 +1282,11 @@ const App = {
                     if (f.properties?.name) labelCache.push({ text: f.properties.name, latlng: ll, type: 'point' });
                     layer = m;
                 } else {
-                    const style = self.getStyle(f, fallback);
                     layer = L.GeoJSON.geometryToLayer(f, {
-                        renderer: self.canvasRenderer,
-                        smoothFactor: 1.5,
-                        ...style
+                        renderer: self.canvasRenderer
                     });
                     layer.feature = f;
+                    if (layer.setStyle) layer.setStyle(self.getStyle(f, fallback));
                     if ((gt === 'Polygon' || gt === 'MultiPolygon') && f.properties?.name) {
                         labelCache.push({ text: f.properties.name, bounds: layer.getBounds(), type: 'polygon' });
                     }
@@ -1499,7 +1320,7 @@ const App = {
                 layer.openPopup();
             }
         });
-        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci, _text: text };
+        this.importedLayers[layerId] = { layer: group, name: fileName, color: fallback, _labelCache: labelCache, ext, colorIndex: ci };
         this._buildSearchIndex(layerId);
         return group;
     },
@@ -1516,20 +1337,16 @@ const App = {
         const file = event.target.files[0];
         if (!file || this._importing) return;
         this._importing = true;
-        const fileName = file.name, ext = (file.name.split('.').pop() || 'kml').toLowerCase(), ci = this.colorIndex++;
+        const fileName = file.name, ext = file.name.split('.').pop().toLowerCase(), ci = this.colorIndex++;
         try {
             this.showLoading('读取文件...');
             const text = await file.text();
-            const layerId = 'lyr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            const layerId = Date.now();
             const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci, msg => this.showLoading(msg));
-            if (!layer) {
-                this.hideLoading();
-                alert('无法识别的文件格式，请导入 KML / GeoJSON / GPX');
-                return;
-            }
+            if (!layer) return;
             if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
             this.showLoading('保存...');
-            await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci, visible: true });
+            await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci });
             this.updateImportedLayersList();
             this.debouncedSave();
             this.updateLabelOverlay();
@@ -1565,13 +1382,14 @@ const App = {
             div.className = 'layer-item';
             div.draggable = true;
             div.dataset.id = id;
+            const cloudIcon = d._cloud ? '&#9729; ' : '';
             const checkedAttr = d.visible !== false ? 'checked' : '';
             const moveUpDisabled = i === 0 ? 'disabled' : '';
             const moveDownDisabled = i === orderLen - 1 ? 'disabled' : '';
             div.innerHTML = `<input type="checkbox" ${checkedAttr} onchange="App.toggleLayer('${id}',this.checked)">
                 <span class="layer-color-indicator" style="background:${d.color}"></span>
                 <div class="layer-item-info">
-                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${this.escH(d.name)}</span>
+                    <span class="layer-item-name" ondblclick="App.startRename('${id}',this)">${cloudIcon}${this.escH(d.name)}</span>
                     <div class="layer-actions">
                         <button title="上移" onclick="App.moveLayer('${id}',-1)" ${moveUpDisabled}>&#9650;</button>
                         <button title="下移" onclick="App.moveLayer('${id}',1)" ${moveDownDisabled}>&#9660;</button>
@@ -1747,16 +1565,8 @@ const App = {
             d._nameInverted = null;
             d._descInverted = null;
             el.textContent = newName;
-            try {
-                const saved = await Storage.getLayer(id);
-                await Storage.saveLayer(id, {
-                    name: d.name,
-                    ext: (saved && saved.ext) || d.ext || 'kml',
-                    text: (saved && saved.text) || d._text || '',
-                    colorIndex: (saved && saved.colorIndex) ?? d.colorIndex ?? 0,
-                    visible: (saved && saved.visible) !== false
-                });
-            } catch (e) { console.error('rename save failed:', id, e); }
+            const saved = await Storage.getLayer(id);
+            if (saved) await Storage.saveLayer(id, { ...saved, name: d.name });
         };
         input.addEventListener('blur', finish);
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.name; input.blur(); } });
@@ -1771,13 +1581,7 @@ const App = {
             this.updateLabelOverlay();
             try {
                 const saved = await Storage.getLayer(id);
-                await Storage.saveLayer(id, {
-                    name: d.name,
-                    ext: (saved && saved.ext) || d.ext || 'kml',
-                    text: (saved && saved.text) || d._text || '',
-                    colorIndex: (saved && saved.colorIndex) ?? d.colorIndex ?? 0,
-                    visible: vis
-                });
+                if (saved) await Storage.saveLayer(id, { ...saved, visible: vis });
             } catch (e) { console.error('toggleLayer save failed:', id, e); }
         }
     },
@@ -2009,12 +1813,11 @@ const App = {
         }).join('') + '</div>';
     },
 
-    // 从云端下载文件并保存为本地图层（与文件导入等价）
     async syncSelectedCloudFiles() {
         const activeTab = this._cloudTab;
         const containerId = activeTab === 'cloud' ? 'cloudRemoteFileList' : 'cloudLocalFileList';
         const checks = document.querySelectorAll('#' + containerId + ' input[type="checkbox"]:checked:not(:disabled)');
-        if (!checks.length) { alert('请选择要导入的图层'); return; }
+        if (!checks.length) { alert('请选择要同步的图层'); return; }
 
         this.showLoading('正在获取图层...');
         this.closeCloudSync();
@@ -2043,38 +1846,28 @@ const App = {
 
         const total = files.length;
         let done = 0;
-        let failed = 0;
-        this.showLoading(`正在导入 (0/${total})...`);
+        this.showLoading(`正在同步 (0/${total})...`);
 
         await new Promise(r => setTimeout(r, 50));
 
         for (const f of files) {
             try {
-                const text = f.text == null ? '' : String(f.text);
-                if (!text) throw new Error('文件内容为空');
-                const ext = (f.ext || 'kml').toLowerCase();
-                const fileName = f.name || ('cloud_' + Date.now());
+                const layerId = 'cloud_' + Date.now() + '_' + done;
                 const ci = this.colorIndex++;
-                const layerId = 'lyr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                const layer = await this.renderLayerAsync(text, ext, fileName, layerId, ci);
-                if (!layer) throw new Error('无法识别的文件格式');
-                if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
-                await Storage.saveLayer(layerId, { name: fileName, ext, text, colorIndex: ci, visible: true });
-            } catch (e) {
-                console.error('导入失败:', f.name, e);
-                failed++;
-            }
+                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
+                if (layer && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                this._layerOrder = this._layerOrder || [];
+                this._layerOrder.push(layerId);
+                await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci });
+            } catch (e) { console.error('同步失败:', f.name, e); }
             done++;
-            this.showLoading(`正在导入 (${done}/${total})...`);
+            this.showLoading(`正在同步 (${done}/${total})...`);
         }
 
         this.hideLoading();
         this.updateImportedLayersList();
         this.updateLabelOverlay();
         this.debouncedSave();
-        if (failed) {
-            alert(`${failed}/${total} 个图层导入失败，请检查浏览器存储权限，或通过 http://localhost:8080 访问。`);
-        }
     },
 
     toggleSidebar() {
