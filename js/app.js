@@ -147,9 +147,27 @@ const Storage = {
         });
     },
 
+    // localStorage 读-改-写串行化，避免并发 saveLayer 互相覆盖
+    _lsWriteQueue: Promise.resolve(),
+    _queueLsWrite(key, record) {
+        const run = async () => {
+            const lsMap = this._readLsLayers();
+            if (record === null) delete lsMap[key];
+            else lsMap[key] = record;
+            return this._writeLsLayers(lsMap);
+        };
+        const p = this._lsWriteQueue.then(run, run);
+        this._lsWriteQueue = p.then(() => {}, () => {});
+        return p;
+    },
+
     async saveLayer(id, data) {
         const key = this._normId(id);
-        const record = { ...data, id: key };
+        const ext = (data.ext || 'kml').toLowerCase();
+        const record = { ...data, ext, id: key };
+        // 文本一律归一为字符串，避免 undefined 导致恢复时解析失败
+        if (record.text == null) record.text = '';
+        else record.text = String(record.text);
         let saved = false;
         if (this.db) {
             try {
@@ -159,9 +177,22 @@ const Storage = {
                 console.error('Storage: IndexedDB saveLayer failed', key, e);
             }
         }
-        const lsMap = this._readLsLayers();
-        lsMap[key] = record;
-        if (this._writeLsLayers(lsMap)) saved = true;
+        // 大文本（>512KB）不写 localStorage：5MB 配额必爆，且会拖垮整份图层映射
+        // IndexedDB 是主存储；localStorage 仅作小图层/降级缓存
+        if (record.text.length <= 512 * 1024) {
+            try {
+                if (await this._queueLsWrite(key, record)) saved = true;
+            } catch (e) {
+                console.warn('Storage: localStorage layer write failed', key, e);
+            }
+        } else if (!this.db) {
+            // 无 IndexedDB 时仍尝试写入 localStorage，失败则如实抛错
+            try {
+                if (await this._queueLsWrite(key, record)) saved = true;
+            } catch (e) {
+                console.warn('Storage: localStorage large layer write failed', key, e);
+            }
+        }
         if (!saved) throw new Error('浏览器存储不可用，图层未能保存');
         return record;
     },
@@ -173,8 +204,7 @@ const Storage = {
             const nid = Number(key);
             if (!isNaN(nid)) { try { await this._idbDelete(STORE_LAYERS, nid); } catch (e) {} }
         }
-        const lsMap = this._readLsLayers();
-        if (key in lsMap) { delete lsMap[key]; this._writeLsLayers(lsMap); }
+        try { await this._queueLsWrite(key, null); } catch (e) {}
     },
 
     async getLayer(id) {
@@ -1215,7 +1245,9 @@ const App = {
             try {
                 const layerId = String(item.id);
                 const ci = Number.isFinite(item.colorIndex) ? item.colorIndex : this.colorIndex++;
-                await this.renderLayerAsync(item.text, item.ext, item.name, layerId, ci);
+                await this.renderLayerAsync(item.text, (item.ext || 'kml').toLowerCase(), item.name, layerId, ci);
+                const dRestored = this.importedLayers[layerId];
+                if (dRestored && (item.cloudId || layerId.startsWith('cloud_'))) dRestored._cloud = true;
                 if (item.visible === false) {
                     const d = this.importedLayers[layerId];
                     if (d) { this.map.removeLayer(d.layer); d.visible = false; }
@@ -1234,22 +1266,23 @@ const App = {
         const files = await CloudReader.getEnabledFiles();
         if (!files.length) return;
         const existingNames = new Set(Object.values(this.importedLayers).map(d => d.name));
-        const newFiles = files.filter(f => !existingNames.has(f.name));
+        const existingIds = new Set(Object.keys(this.importedLayers));
+        const newFiles = files.filter(f => !existingNames.has(f.name) && !existingIds.has(String(f.id)));
         if (!newFiles.length) return;
         const total = newFiles.length;
         let done = 0;
         this.showLoading(`并行加载 ${total} 个云端图层 (0/${total})...`);
         const tasks = newFiles.map((f, i) => async () => {
             try {
-                const layerId = 'cloud_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6);
+                const layerId = String(f.id || ('cloud_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6)));
                 const ci = this.colorIndex++;
-                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
+                const layer = await this.renderLayerAsync(f.text, (f.ext || 'kml').toLowerCase(), f.name, layerId, ci);
                 if (layer) {
                     if (!auto && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
                     this.importedLayers[layerId]._cloud = true;
                     this._layerOrder = this._layerOrder || [];
-                    this._layerOrder.push(layerId);
-                    await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci, visible: true });
+                    if (!this._layerOrder.includes(layerId)) this._layerOrder.push(layerId);
+                    await Storage.saveLayer(layerId, { name: f.name, ext: (f.ext || 'kml').toLowerCase(), text: f.text, colorIndex: ci, visible: true });
                 }
             } catch (e) { console.error('cloud layer load failed:', f.name, e); }
             done++;
@@ -1519,7 +1552,7 @@ const App = {
         const file = event.target.files[0];
         if (!file || this._importing) return;
         this._importing = true;
-        const fileName = file.name, ext = file.name.split('.').pop().toLowerCase(), ci = this.colorIndex++;
+        const fileName = file.name, ext = (file.name.split('.').pop() || 'kml').toLowerCase(), ci = this.colorIndex++;
         try {
             this.showLoading('读取文件...');
             const text = await file.text();
@@ -1845,6 +1878,14 @@ const App = {
             if (d._nameInverted) d._nameInverted = null;
             if (d._descInverted) d._descInverted = null;
             await Storage.removeLayer(id);
+            // 同步禁用浏览器云端缓存，避免刷新后 loadCloudLayers 再次自动加载
+            try {
+                const files = await CloudReader.getAllFiles();
+                const hit = files.find(f => String(f.id) === String(id) || f.name === d.name);
+                if (hit && hit.enabled !== false) {
+                    await CloudReader.save({ ...hit, enabled: false, updatedAt: Date.now() });
+                }
+            } catch (e) { /* CloudReader 不可用时忽略 */ }
             this.updateImportedLayersList();
             this.updateLabelOverlay();
         }
@@ -2046,20 +2087,42 @@ const App = {
 
         const total = files.length;
         let done = 0;
+        let failed = 0;
         this.showLoading(`正在同步 (0/${total})...`);
 
         await new Promise(r => setTimeout(r, 50));
 
         for (const f of files) {
             try {
-                const layerId = 'cloud_' + Date.now() + '_' + done + '_' + Math.random().toString(36).slice(2, 6);
+                const text = f.text == null ? '' : String(f.text);
+                if (!text) throw new Error('文件内容为空');
+                const ext = (f.ext || 'kml').toLowerCase();
+                const layerId = String(f.id || ('cloud_' + Date.now() + '_' + done + '_' + Math.random().toString(36).slice(2, 6)));
                 const ci = this.colorIndex++;
-                const layer = await this.renderLayerAsync(f.text, f.ext || 'kml', f.name, layerId, ci);
-                if (layer && layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                const layer = await this.renderLayerAsync(text, ext, f.name, layerId, ci);
+                if (!layer) throw new Error('无法识别的文件格式');
+                if (layer.getBounds().isValid()) this.map.fitBounds(layer.getBounds());
+                if (this.importedLayers[layerId]) this.importedLayers[layerId]._cloud = true;
                 this._layerOrder = this._layerOrder || [];
-                this._layerOrder.push(layerId);
-                await Storage.saveLayer(layerId, { name: f.name, ext: f.ext || 'kml', text: f.text, colorIndex: ci, visible: true });
-            } catch (e) { console.error('同步失败:', f.name, e); }
+                if (!this._layerOrder.includes(layerId)) this._layerOrder.push(layerId);
+                // 先缓存到浏览器云端库（刷新后 loadCloudLayers 兜底），再写持久化图层
+                try {
+                    await CloudReader.save({
+                        id: f.id || layerId,
+                        name: f.name,
+                        text,
+                        ext,
+                        size: text.length,
+                        enabled: true,
+                        createdAt: f.createdAt || Date.now(),
+                        updatedAt: Date.now()
+                    });
+                } catch (ce) { console.warn('云端文件缓存到浏览器失败:', f.name, ce); }
+                await Storage.saveLayer(layerId, { name: f.name, ext, text, colorIndex: ci, visible: true, cloudId: f.id || null });
+            } catch (e) {
+                console.error('同步失败:', f.name, e);
+                failed++;
+            }
             done++;
             this.showLoading(`正在同步 (${done}/${total})...`);
         }
@@ -2068,6 +2131,9 @@ const App = {
         this.updateImportedLayersList();
         this.updateLabelOverlay();
         this.debouncedSave();
+        if (failed) {
+            alert(`${failed}/${total} 个图层保存失败，刷新后可能丢失。\n请检查浏览器存储权限，或通过 http://localhost:8080 访问。`);
+        }
     },
 
     toggleSidebar() {
